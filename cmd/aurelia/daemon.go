@@ -51,7 +51,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	// Create and start daemon with Keychain secret store
 	secrets := keychain.NewKeychainStore()
-	d := daemon.NewDaemon(specDir, daemon.WithSecrets(secrets))
+	stateDir := filepath.Join(filepath.Dir(specDir))
+	d := daemon.NewDaemon(specDir, daemon.WithSecrets(secrets), daemon.WithStateDir(stateDir))
 	if err := d.Start(ctx); err != nil {
 		return fmt.Errorf("starting daemon: %w", err)
 	}
@@ -99,7 +100,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	// Graceful shutdown
 	cancel()
-	d.Stop(30)
+	d.Stop(30 * time.Second)
 	srv.Shutdown(context.Background())
 	os.Remove(socketPath)
 

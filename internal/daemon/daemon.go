@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/benaskins/aurelia/internal/driver"
 	"github.com/benaskins/aurelia/internal/keychain"
 	"github.com/benaskins/aurelia/internal/spec"
 )
@@ -14,9 +15,11 @@ import (
 // Daemon is the top-level process supervisor.
 type Daemon struct {
 	specDir  string
+	stateDir string
 	secrets  keychain.Store
 	services map[string]*ManagedService
 	deps     *depGraph
+	state    *stateFile
 	mu       sync.RWMutex
 	logger   *slog.Logger
 }
@@ -26,12 +29,14 @@ type Daemon struct {
 func NewDaemon(specDir string, opts ...DaemonOption) *Daemon {
 	d := &Daemon{
 		specDir:  specDir,
+		stateDir: specDir, // default: same as spec dir
 		services: make(map[string]*ManagedService),
 		logger:   slog.With("component", "daemon"),
 	}
 	for _, opt := range opts {
 		opt(d)
 	}
+	d.state = newStateFile(d.stateDir)
 	return d
 }
 
@@ -42,6 +47,13 @@ type DaemonOption func(*Daemon)
 func WithSecrets(s keychain.Store) DaemonOption {
 	return func(d *Daemon) {
 		d.secrets = s
+	}
+}
+
+// WithStateDir sets the directory for the daemon state file.
+func WithStateDir(dir string) DaemonOption {
+	return func(d *Daemon) {
+		d.stateDir = dir
 	}
 }
 
@@ -66,13 +78,33 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	d.logger.Info("start order resolved", "order", order)
 
+	// Load previous state for crash recovery
+	prevState, _ := d.state.load()
+
 	for _, name := range order {
 		s := g.specs[name]
+
+		// Try to adopt a previously-running process
+		if rec, ok := prevState[name]; ok && rec.Type == "native" && rec.PID > 0 {
+			adopted, err := driver.NewAdopted(rec.PID)
+			if err == nil {
+				d.logger.Info("recovering running process", "service", name, "pid", rec.PID)
+				if err := d.adoptService(ctx, s, adopted); err != nil {
+					d.logger.Error("failed to adopt service", "service", name, "error", err)
+				} else {
+					continue
+				}
+			} else {
+				d.logger.Info("previous process not running", "service", name, "pid", rec.PID)
+			}
+		}
+
 		if err := d.startService(ctx, s); err != nil {
 			d.logger.Error("failed to start service", "service", name, "error", err)
 		}
 	}
 
+	// Clean up state file — it will be rebuilt by running services
 	return nil
 }
 
@@ -268,6 +300,14 @@ func (d *Daemon) startServiceLocked(ctx context.Context, s *spec.ServiceSpec) er
 		return err
 	}
 
+	name := s.Service.Name
+	ms.onStarted = func(pid int) {
+		rec := ServiceRecord{Type: s.Service.Type, PID: pid}
+		if err := d.state.set(name, rec); err != nil {
+			d.logger.Warn("failed to save service state", "service", name, "error", err)
+		}
+	}
+
 	if err := ms.Start(ctx); err != nil {
 		return err
 	}
@@ -276,3 +316,31 @@ func (d *Daemon) startServiceLocked(ctx context.Context, s *spec.ServiceSpec) er
 	d.logger.Info("started service", "service", s.Service.Name, "type", s.Service.Type)
 	return nil
 }
+
+func (d *Daemon) adoptService(ctx context.Context, s *spec.ServiceSpec, drv driver.Driver) error {
+	ms, err := NewManagedService(s, d.secrets)
+	if err != nil {
+		return err
+	}
+
+	name := s.Service.Name
+	ms.adoptedDrv = drv
+	ms.onStarted = func(pid int) {
+		rec := ServiceRecord{Type: s.Service.Type, PID: pid}
+		if err := d.state.set(name, rec); err != nil {
+			d.logger.Warn("failed to save service state", "service", name, "error", err)
+		}
+	}
+
+	if err := ms.Start(ctx); err != nil {
+		return err
+	}
+
+	d.mu.Lock()
+	d.services[s.Service.Name] = ms
+	d.mu.Unlock()
+
+	d.logger.Info("adopted service", "service", s.Service.Name, "pid", drv.Info().PID)
+	return nil
+}
+

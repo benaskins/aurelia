@@ -38,9 +38,13 @@ type ManagedService struct {
 	restartCount int
 	cancel       context.CancelFunc
 	stopped      chan struct{}
+	// onStarted is called after a process starts successfully (for state persistence)
+	onStarted func(pid int)
 
 	// unhealthyCh signals the supervision loop to restart due to health failure
 	unhealthyCh chan struct{}
+	// adoptedDrv is set when recovering a previously-running process
+	adoptedDrv driver.Driver
 }
 
 // NewManagedService creates a managed service from a spec.
@@ -153,7 +157,18 @@ func (ms *ManagedService) supervise(ctx context.Context) {
 	}()
 
 	for {
-		drv := ms.createDriver()
+		// On first iteration, use adopted driver if recovering a running process
+		var drv driver.Driver
+		ms.mu.Lock()
+		if ms.adoptedDrv != nil {
+			drv = ms.adoptedDrv
+			ms.adoptedDrv = nil
+			ms.mu.Unlock()
+			ms.logger.Info("adopted running process", "pid", drv.Info().PID)
+		} else {
+			ms.mu.Unlock()
+			drv = ms.createDriver()
+		}
 
 		ms.mu.Lock()
 		ms.drv = drv
@@ -180,6 +195,11 @@ func (ms *ManagedService) supervise(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			}
+		}
+
+		// Notify daemon of PID for state persistence
+		if ms.onStarted != nil {
+			ms.onStarted(drv.Info().PID)
 		}
 
 		// Start health monitoring if configured

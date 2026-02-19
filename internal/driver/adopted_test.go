@@ -1,0 +1,116 @@
+package driver
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"testing"
+	"time"
+)
+
+func TestAdoptedDriverMonitorsProcess(t *testing.T) {
+	// Start a real process to adopt
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting process: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	pid := cmd.Process.Pid
+
+	drv, err := NewAdopted(pid)
+	if err != nil {
+		t.Fatalf("NewAdopted: %v", err)
+	}
+
+	info := drv.Info()
+	if info.PID != pid {
+		t.Errorf("expected PID %d, got %d", pid, info.PID)
+	}
+	if info.State != StateRunning {
+		t.Errorf("expected running, got %v", info.State)
+	}
+
+	// Stop it
+	if err := drv.Stop(context.Background(), 5*time.Second); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	info = drv.Info()
+	if info.State != StateStopped {
+		t.Errorf("expected stopped, got %v", info.State)
+	}
+}
+
+func TestAdoptedDriverDetectsExit(t *testing.T) {
+	// Start a short-lived process
+	cmd := exec.Command("sleep", "0.5")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting process: %v", err)
+	}
+
+	pid := cmd.Process.Pid
+
+	drv, err := NewAdopted(pid)
+	if err != nil {
+		t.Fatalf("NewAdopted: %v", err)
+	}
+
+	// Reap the child (we're the parent) so it doesn't become a zombie
+	go cmd.Wait()
+
+	// Wait for the adopted driver to detect exit
+	code, _ := drv.Wait()
+	_ = code
+
+	info := drv.Info()
+	if info.State == StateRunning {
+		t.Error("expected non-running state after process exit")
+	}
+}
+
+func TestAdoptedDriverRejectsDeadPID(t *testing.T) {
+	// Use a PID that's unlikely to exist
+	_, err := NewAdopted(99999999)
+	if err == nil {
+		t.Error("expected error for dead PID")
+	}
+}
+
+func TestAdoptedDriverStartIsNoop(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting process: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	drv, err := NewAdopted(cmd.Process.Pid)
+	if err != nil {
+		t.Fatalf("NewAdopted: %v", err)
+	}
+	defer drv.Stop(context.Background(), 5*time.Second)
+
+	// Start should be a no-op
+	if err := drv.Start(context.Background()); err != nil {
+		t.Errorf("Start should be no-op, got: %v", err)
+	}
+
+	// Should still be running
+	if drv.Info().State != StateRunning {
+		t.Error("expected still running after Start()")
+	}
+}
+
+func TestAdoptedDriverUsesCurrentPID(t *testing.T) {
+	// Our own process should be adoptable
+	drv, err := NewAdopted(os.Getpid())
+	if err != nil {
+		t.Fatalf("NewAdopted(self): %v", err)
+	}
+
+	if drv.Info().PID != os.Getpid() {
+		t.Errorf("expected PID %d, got %d", os.Getpid(), drv.Info().PID)
+	}
+
+	// Don't stop our own process!
+}
