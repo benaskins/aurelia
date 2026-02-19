@@ -224,6 +224,52 @@ func TestManagedServiceExponentialBackoff(t *testing.T) {
 	}
 }
 
+func TestManagedServiceHealthState(t *testing.T) {
+	// Start a service with an HTTP health check against a port nothing listens on
+	s := &spec.ServiceSpec{
+		Service: spec.Service{
+			Name:    "test-health",
+			Type:    "native",
+			Command: "sleep 60",
+		},
+		Health: &spec.HealthCheck{
+			Type:               "tcp",
+			Port:               19876, // nothing listening
+			Interval:           spec.Duration{Duration: 50 * time.Millisecond},
+			Timeout:            spec.Duration{Duration: 100 * time.Millisecond},
+			UnhealthyThreshold: 2,
+		},
+		Restart: &spec.RestartPolicy{
+			Policy:      "on-failure",
+			MaxAttempts: 1,
+			Delay:       spec.Duration{Duration: 100 * time.Millisecond},
+		},
+	}
+
+	ms, err := NewManagedService(s)
+	if err != nil {
+		t.Fatalf("failed to create: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := ms.Start(ctx); err != nil {
+		t.Fatalf("failed to start: %v", err)
+	}
+
+	// Wait for health checks to trigger unhealthy
+	time.Sleep(500 * time.Millisecond)
+
+	state := ms.State()
+	if state.Health != "unhealthy" {
+		t.Errorf("expected unhealthy, got %v", state.Health)
+	}
+
+	cancel()
+	time.Sleep(200 * time.Millisecond)
+}
+
 func TestManagedServiceRejectsContainer(t *testing.T) {
 	s := &spec.ServiceSpec{
 		Service: spec.Service{

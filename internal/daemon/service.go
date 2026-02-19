@@ -9,30 +9,36 @@ import (
 	"time"
 
 	"github.com/benaskins/aurelia/internal/driver"
+	"github.com/benaskins/aurelia/internal/health"
 	"github.com/benaskins/aurelia/internal/spec"
 )
 
 // ServiceState is the externally-visible state of a managed service.
 type ServiceState struct {
-	Name         string       `json:"name"`
-	Type         string       `json:"type"`
-	State        driver.State `json:"state"`
-	PID          int          `json:"pid,omitempty"`
-	Uptime       string       `json:"uptime,omitempty"`
-	RestartCount int          `json:"restart_count"`
-	LastError    string       `json:"last_error,omitempty"`
+	Name         string        `json:"name"`
+	Type         string        `json:"type"`
+	State        driver.State  `json:"state"`
+	Health       health.Status `json:"health"`
+	PID          int           `json:"pid,omitempty"`
+	Uptime       string        `json:"uptime,omitempty"`
+	RestartCount int           `json:"restart_count"`
+	LastError    string        `json:"last_error,omitempty"`
 }
 
-// ManagedService ties a spec to a running driver with restart logic.
+// ManagedService ties a spec to a running driver with restart and health monitoring.
 type ManagedService struct {
-	spec   *spec.ServiceSpec
-	drv    driver.Driver
-	logger *slog.Logger
+	spec    *spec.ServiceSpec
+	drv     driver.Driver
+	monitor *health.Monitor
+	logger  *slog.Logger
 
 	mu           sync.Mutex
 	restartCount int
 	cancel       context.CancelFunc
 	stopped      chan struct{}
+
+	// unhealthyCh signals the supervision loop to restart due to health failure
+	unhealthyCh chan struct{}
 }
 
 // NewManagedService creates a managed service from a spec.
@@ -42,8 +48,9 @@ func NewManagedService(s *spec.ServiceSpec) (*ManagedService, error) {
 	}
 
 	return &ManagedService{
-		spec:   s,
-		logger: slog.With("service", s.Service.Name),
+		spec:        s,
+		logger:      slog.With("service", s.Service.Name),
+		unhealthyCh: make(chan struct{}, 1),
 	}, nil
 }
 
@@ -70,13 +77,19 @@ func (ms *ManagedService) Stop(timeout time.Duration) error {
 	cancel := ms.cancel
 	stopped := ms.stopped
 	drv := ms.drv
+	monitor := ms.monitor
 	ms.mu.Unlock()
 
 	if cancel == nil {
 		return nil
 	}
 
-	// Stop the driver first (graceful SIGTERM → SIGKILL)
+	// Stop health monitoring first
+	if monitor != nil {
+		monitor.Stop()
+	}
+
+	// Stop the driver (graceful SIGTERM → SIGKILL)
 	if drv != nil {
 		drv.Stop(context.Background(), timeout)
 	}
@@ -102,6 +115,11 @@ func (ms *ManagedService) State() ServiceState {
 		Name:         ms.spec.Service.Name,
 		Type:         ms.spec.Service.Type,
 		RestartCount: ms.restartCount,
+		Health:       health.StatusUnknown,
+	}
+
+	if ms.monitor != nil {
+		st.Health = ms.monitor.CurrentStatus()
 	}
 
 	if ms.drv != nil {
@@ -117,22 +135,6 @@ func (ms *ManagedService) State() ServiceState {
 	}
 
 	return st
-}
-
-// Logs returns the last n lines from the process output buffer.
-func (ms *ManagedService) Logs(n int) []string {
-	ms.mu.Lock()
-	drv := ms.drv
-	ms.mu.Unlock()
-
-	if drv == nil {
-		return nil
-	}
-
-	if nd, ok := drv.(*driver.NativeDriver); ok {
-		_ = nd // access ring buffer through driver
-	}
-	return nil
 }
 
 func (ms *ManagedService) supervise(ctx context.Context) {
@@ -173,14 +175,37 @@ func (ms *ManagedService) supervise(ctx context.Context) {
 			}
 		}
 
-		// Wait for process to exit
-		exitCode, _ := drv.Wait()
-		ms.logger.Info("process exited", "exit_code", exitCode)
+		// Start health monitoring if configured
+		monitor := ms.startHealthMonitor(ctx)
+		ms.mu.Lock()
+		ms.monitor = monitor
+		ms.mu.Unlock()
+
+		// Wait for process to exit OR health check to trigger restart
+		select {
+		case <-ms.waitForExit(drv):
+			// Process exited on its own
+			if monitor != nil {
+				monitor.Stop()
+			}
+		case <-ms.unhealthyCh:
+			// Health check triggered restart
+			ms.logger.Warn("restarting due to health check failure")
+			if monitor != nil {
+				monitor.Stop()
+			}
+			drv.Stop(ctx, 30*time.Second)
+			// Drain the done channel
+			drv.Wait()
+		}
+
+		exitCode := drv.Info().ExitCode
 
 		if ctx.Err() != nil {
-			// We were asked to stop
 			return
 		}
+
+		ms.logger.Info("process exited", "exit_code", exitCode)
 
 		// Check restart policy
 		if !ms.shouldRestart() {
@@ -188,7 +213,6 @@ func (ms *ManagedService) supervise(ctx context.Context) {
 			return
 		}
 
-		// Check if we should restart based on exit code and policy
 		policy := "on-failure"
 		if ms.spec.Restart != nil {
 			policy = ms.spec.Restart.Policy
@@ -221,6 +245,50 @@ func (ms *ManagedService) supervise(ctx context.Context) {
 			return
 		}
 	}
+}
+
+func (ms *ManagedService) waitForExit(drv driver.Driver) <-chan struct{} {
+	ch := make(chan struct{})
+	go func() {
+		drv.Wait()
+		close(ch)
+	}()
+	return ch
+}
+
+func (ms *ManagedService) startHealthMonitor(ctx context.Context) *health.Monitor {
+	if ms.spec.Health == nil {
+		return nil
+	}
+
+	h := ms.spec.Health
+	port := h.Port
+	if port == 0 && ms.spec.Network != nil {
+		port = ms.spec.Network.Port
+	}
+
+	cfg := health.Config{
+		Type:               h.Type,
+		Path:               h.Path,
+		Port:               port,
+		Command:            h.Command,
+		Interval:           h.Interval.Duration,
+		Timeout:            h.Timeout.Duration,
+		GracePeriod:        h.GracePeriod.Duration,
+		UnhealthyThreshold: h.UnhealthyThreshold,
+	}
+
+	monitor := health.NewMonitor(cfg, ms.logger, func() {
+		// Signal the supervision loop to restart
+		select {
+		case ms.unhealthyCh <- struct{}{}:
+		default:
+			// Already signaled
+		}
+	})
+
+	monitor.Start(ctx)
+	return monitor
 }
 
 func (ms *ManagedService) createDriver() driver.Driver {
