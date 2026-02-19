@@ -1,0 +1,95 @@
+//go:build darwin
+
+package keychain
+
+import (
+	"fmt"
+
+	gokeychain "github.com/keybase/go-keychain"
+)
+
+const (
+	// ServiceName is the Keychain service attribute for all aurelia secrets.
+	ServiceName = "com.aurelia"
+)
+
+// KeychainStore provides CRUD operations for secrets in macOS Keychain.
+type KeychainStore struct {
+	service string
+}
+
+// NewKeychainStore creates a new Keychain-backed secret store.
+func NewKeychainStore() *KeychainStore {
+	return &KeychainStore{service: ServiceName}
+}
+
+// Set stores a secret in the Keychain. Overwrites if it already exists.
+func (s *KeychainStore) Set(key, value string) error {
+	// Try to delete existing item first (update = delete + add)
+	_ = s.Delete(key)
+
+	item := gokeychain.NewGenericPassword(
+		s.service,
+		key,
+		fmt.Sprintf("aurelia: %s", key),
+		[]byte(value),
+		"",
+	)
+	item.SetSynchronizable(gokeychain.SynchronizableNo)
+	item.SetAccessible(gokeychain.AccessibleWhenUnlockedThisDeviceOnly)
+
+	if err := gokeychain.AddItem(item); err != nil {
+		return fmt.Errorf("keychain add %q: %w", key, err)
+	}
+	return nil
+}
+
+// Get retrieves a secret from the Keychain.
+func (s *KeychainStore) Get(key string) (string, error) {
+	data, err := gokeychain.GetGenericPassword(s.service, key, "", "")
+	if err != nil {
+		if err == gokeychain.ErrorItemNotFound {
+			return "", fmt.Errorf("secret %q not found", key)
+		}
+		return "", fmt.Errorf("keychain get %q: %w", key, err)
+	}
+	if len(data) == 0 {
+		return "", fmt.Errorf("secret %q not found", key)
+	}
+	return string(data), nil
+}
+
+// List returns all secret keys stored by aurelia.
+func (s *KeychainStore) List() ([]string, error) {
+	accounts, err := gokeychain.GetGenericPasswordAccounts(s.service)
+	if err != nil {
+		if err == gokeychain.ErrorItemNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("keychain list: %w", err)
+	}
+	return accounts, nil
+}
+
+// Delete removes a secret from the Keychain.
+func (s *KeychainStore) Delete(key string) error {
+	err := gokeychain.DeleteGenericPasswordItem(s.service, key)
+	if err != nil && err != gokeychain.ErrorItemNotFound {
+		return fmt.Errorf("keychain delete %q: %w", key, err)
+	}
+	return nil
+}
+
+// GetMultiple retrieves multiple secrets at once, returning a map of key→value.
+// Missing keys are silently skipped.
+func (s *KeychainStore) GetMultiple(keys []string) (map[string]string, error) {
+	result := make(map[string]string, len(keys))
+	for _, key := range keys {
+		val, err := s.Get(key)
+		if err != nil {
+			continue
+		}
+		result[key] = val
+	}
+	return result, nil
+}

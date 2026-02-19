@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/benaskins/aurelia/internal/driver"
+	"github.com/benaskins/aurelia/internal/keychain"
 	"github.com/benaskins/aurelia/internal/spec"
 )
 
@@ -21,7 +23,7 @@ func TestManagedServiceStartStop(t *testing.T) {
 		},
 	}
 
-	ms, err := NewManagedService(s)
+	ms, err := NewManagedService(s, nil)
 	if err != nil {
 		t.Fatalf("failed to create: %v", err)
 	}
@@ -66,7 +68,7 @@ func TestManagedServiceRestartOnFailure(t *testing.T) {
 		},
 	}
 
-	ms, err := NewManagedService(s)
+	ms, err := NewManagedService(s, nil)
 	if err != nil {
 		t.Fatalf("failed to create: %v", err)
 	}
@@ -102,7 +104,7 @@ func TestManagedServiceNoRestartOnCleanExit(t *testing.T) {
 		},
 	}
 
-	ms, err := NewManagedService(s)
+	ms, err := NewManagedService(s, nil)
 	if err != nil {
 		t.Fatalf("failed to create: %v", err)
 	}
@@ -135,7 +137,7 @@ func TestManagedServiceAlwaysRestart(t *testing.T) {
 		},
 	}
 
-	ms, err := NewManagedService(s)
+	ms, err := NewManagedService(s, nil)
 	if err != nil {
 		t.Fatalf("failed to create: %v", err)
 	}
@@ -170,7 +172,7 @@ func TestManagedServiceNeverRestart(t *testing.T) {
 		},
 	}
 
-	ms, err := NewManagedService(s)
+	ms, err := NewManagedService(s, nil)
 	if err != nil {
 		t.Fatalf("failed to create: %v", err)
 	}
@@ -203,7 +205,7 @@ func TestManagedServiceExponentialBackoff(t *testing.T) {
 		},
 	}
 
-	ms, err := NewManagedService(s)
+	ms, err := NewManagedService(s, nil)
 	if err != nil {
 		t.Fatalf("failed to create: %v", err)
 	}
@@ -246,7 +248,7 @@ func TestManagedServiceHealthState(t *testing.T) {
 		},
 	}
 
-	ms, err := NewManagedService(s)
+	ms, err := NewManagedService(s, nil)
 	if err != nil {
 		t.Fatalf("failed to create: %v", err)
 	}
@@ -279,8 +281,59 @@ func TestManagedServiceRejectsContainer(t *testing.T) {
 		},
 	}
 
-	_, err := NewManagedService(s)
+	_, err := NewManagedService(s, nil)
 	if err == nil {
 		t.Error("expected error for container service")
+	}
+}
+
+func TestManagedServiceSecretInjection(t *testing.T) {
+	secrets := keychain.NewMemoryStore()
+	secrets.Set("chat/database-url", "postgres://secret@localhost/db")
+
+	s := &spec.ServiceSpec{
+		Service: spec.Service{
+			Name:    "test-secret",
+			Type:    "native",
+			Command: "printenv DATABASE_URL",
+		},
+		Secrets: map[string]spec.SecretRef{
+			"DATABASE_URL": {Keychain: "chat/database-url"},
+		},
+		Restart: &spec.RestartPolicy{
+			Policy: "never",
+		},
+	}
+
+	ms, err := NewManagedService(s, secrets)
+	if err != nil {
+		t.Fatalf("failed to create: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := ms.Start(ctx); err != nil {
+		t.Fatalf("failed to start: %v", err)
+	}
+
+	// Wait for process to run and exit
+	time.Sleep(500 * time.Millisecond)
+
+	ms.Stop(5 * time.Second)
+
+	// Check stdout captured the secret
+	if ms.drv == nil {
+		t.Fatal("expected driver to exist")
+	}
+
+	stdout := ms.drv.Stdout()
+	buf := make([]byte, 1024)
+	n, _ := stdout.Read(buf)
+	output := string(buf[:n])
+
+	expected := "postgres://secret@localhost/db"
+	if output == "" {
+		t.Error("expected secret to be in stdout")
+	} else if strings.TrimSpace(output) != expected {
+		t.Errorf("expected %q, got %q", expected, output)
 	}
 }

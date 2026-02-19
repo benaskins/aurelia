@@ -10,6 +10,7 @@ import (
 
 	"github.com/benaskins/aurelia/internal/driver"
 	"github.com/benaskins/aurelia/internal/health"
+	"github.com/benaskins/aurelia/internal/keychain"
 	"github.com/benaskins/aurelia/internal/spec"
 )
 
@@ -30,6 +31,7 @@ type ManagedService struct {
 	spec    *spec.ServiceSpec
 	drv     driver.Driver
 	monitor *health.Monitor
+	secrets keychain.Store
 	logger  *slog.Logger
 
 	mu           sync.Mutex
@@ -42,13 +44,15 @@ type ManagedService struct {
 }
 
 // NewManagedService creates a managed service from a spec.
-func NewManagedService(s *spec.ServiceSpec) (*ManagedService, error) {
+// The secrets store is optional — if nil, secret refs in the spec are skipped.
+func NewManagedService(s *spec.ServiceSpec, secrets keychain.Store) (*ManagedService, error) {
 	if s.Service.Type != "native" {
 		return nil, fmt.Errorf("only native services are supported (got %q)", s.Service.Type)
 	}
 
 	return &ManagedService{
 		spec:        s,
+		secrets:     secrets,
 		logger:      slog.With("service", s.Service.Name),
 		unhealthyCh: make(chan struct{}, 1),
 	}, nil
@@ -295,6 +299,19 @@ func (ms *ManagedService) createDriver() driver.Driver {
 	env := os.Environ()
 	for k, v := range ms.spec.Env {
 		env = append(env, k+"="+v)
+	}
+
+	// Resolve secrets from Keychain and inject as env vars
+	if ms.secrets != nil && len(ms.spec.Secrets) > 0 {
+		for envVar, ref := range ms.spec.Secrets {
+			val, err := ms.secrets.Get(ref.Keychain)
+			if err != nil {
+				ms.logger.Warn("secret not found, skipping", "env_var", envVar, "keychain_key", ref.Keychain, "error", err)
+				continue
+			}
+			env = append(env, envVar+"="+val)
+			ms.logger.Info("injected secret", "env_var", envVar)
+		}
 	}
 
 	return driver.NewNative(driver.NativeConfig{

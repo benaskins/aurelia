@@ -11,6 +11,7 @@ import (
 
 	"github.com/benaskins/aurelia/internal/api"
 	"github.com/benaskins/aurelia/internal/daemon"
+	"github.com/benaskins/aurelia/internal/keychain"
 	"github.com/spf13/cobra"
 )
 
@@ -45,8 +46,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
-	// Create and start daemon
-	d := daemon.NewDaemon(specDir)
+	// Create and start daemon with Keychain secret store
+	secrets := keychain.NewKeychainStore()
+	d := daemon.NewDaemon(specDir, daemon.WithSecrets(secrets))
 	if err := d.Start(ctx); err != nil {
 		return fmt.Errorf("starting daemon: %w", err)
 	}

@@ -7,23 +7,40 @@ import (
 	"sync"
 	"time"
 
+	"github.com/benaskins/aurelia/internal/keychain"
 	"github.com/benaskins/aurelia/internal/spec"
 )
 
 // Daemon is the top-level process supervisor.
 type Daemon struct {
 	specDir  string
+	secrets  keychain.Store
 	services map[string]*ManagedService
 	mu       sync.RWMutex
 	logger   *slog.Logger
 }
 
 // NewDaemon creates a new daemon that manages services from the given spec directory.
-func NewDaemon(specDir string) *Daemon {
-	return &Daemon{
+// The secrets store is optional — if nil, secret injection is disabled.
+func NewDaemon(specDir string, opts ...DaemonOption) *Daemon {
+	d := &Daemon{
 		specDir:  specDir,
 		services: make(map[string]*ManagedService),
 		logger:   slog.With("component", "daemon"),
+	}
+	for _, opt := range opts {
+		opt(d)
+	}
+	return d
+}
+
+// DaemonOption configures the daemon.
+type DaemonOption func(*Daemon)
+
+// WithSecrets sets the secret store for the daemon.
+func WithSecrets(s keychain.Store) DaemonOption {
+	return func(d *Daemon) {
+		d.secrets = s
 	}
 }
 
@@ -183,7 +200,7 @@ func (d *Daemon) startService(ctx context.Context, s *spec.ServiceSpec) error {
 }
 
 func (d *Daemon) startServiceLocked(ctx context.Context, s *spec.ServiceSpec) error {
-	ms, err := NewManagedService(s)
+	ms, err := NewManagedService(s, d.secrets)
 	if err != nil {
 		return err
 	}
