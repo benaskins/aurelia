@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/benaskins/aurelia/internal/daemon"
+	"github.com/benaskins/aurelia/internal/gpu"
 	"github.com/spf13/cobra"
 )
 
@@ -95,6 +96,14 @@ var statusCmd = &cobra.Command{
 				s.Name, s.Type, s.State, health, pid, uptime, s.RestartCount)
 		}
 		w.Flush()
+
+		// GPU summary line
+		gpuInfo := gpu.QueryNow()
+		if gpuInfo.Name != "" {
+			fmt.Printf("\nGPU: %s | VRAM: %.1f/%.1f GB | Thermal: %s\n",
+				gpuInfo.Name, gpuInfo.AllocatedGB(), gpuInfo.RecommendedMaxGB(), gpuInfo.ThermalState)
+		}
+
 		return nil
 	},
 }

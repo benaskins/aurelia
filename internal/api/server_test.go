@@ -35,7 +35,7 @@ func setupTestServer(t *testing.T, specs map[string]string) (*Server, *http.Clie
 	// Wait for processes to start
 	time.Sleep(100 * time.Millisecond)
 
-	srv := NewServer(d, ctx)
+	srv := NewServer(d, nil, ctx)
 
 	// Use a random Unix socket
 	sockPath := filepath.Join(t.TempDir(), "test.sock")

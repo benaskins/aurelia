@@ -9,8 +9,11 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"time"
+
 	"github.com/benaskins/aurelia/internal/api"
 	"github.com/benaskins/aurelia/internal/daemon"
+	"github.com/benaskins/aurelia/internal/gpu"
 	"github.com/benaskins/aurelia/internal/keychain"
 	"github.com/spf13/cobra"
 )
@@ -61,7 +64,11 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating socket dir: %w", err)
 	}
 
-	srv := api.NewServer(d, ctx)
+	// Start GPU observer
+	gpuObs := gpu.NewObserver(5 * time.Second)
+	gpuObs.Start(ctx)
+
+	srv := api.NewServer(d, gpuObs, ctx)
 
 	// Start API in background
 	errCh := make(chan error, 1)

@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"github.com/benaskins/aurelia/internal/daemon"
+	"github.com/benaskins/aurelia/internal/gpu"
 )
 
 // Server serves the aurelia REST API over a Unix socket.
 type Server struct {
 	daemon   *daemon.Daemon
+	gpu      *gpu.Observer
 	listener net.Listener
 	server   *http.Server
 	logger   *slog.Logger
@@ -21,9 +23,11 @@ type Server struct {
 }
 
 // NewServer creates an API server backed by the given daemon.
-func NewServer(d *daemon.Daemon, ctx context.Context) *Server {
+// The GPU observer is optional — if nil, /v1/gpu returns empty.
+func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer, ctx context.Context) *Server {
 	s := &Server{
 		daemon: d,
+		gpu:    gpuObs,
 		logger: slog.With("component", "api"),
 		ctx:    ctx,
 	}
@@ -35,6 +39,7 @@ func NewServer(d *daemon.Daemon, ctx context.Context) *Server {
 	mux.HandleFunc("POST /v1/services/{name}/stop", s.stopService)
 	mux.HandleFunc("POST /v1/services/{name}/restart", s.restartService)
 	mux.HandleFunc("POST /v1/reload", s.reload)
+	mux.HandleFunc("GET /v1/gpu", s.gpuInfo)
 	mux.HandleFunc("GET /v1/health", s.health)
 
 	s.server = &http.Server{Handler: mux}
@@ -117,6 +122,14 @@ func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) gpuInfo(w http.ResponseWriter, r *http.Request) {
+	if s.gpu == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.gpu.Info())
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
