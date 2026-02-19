@@ -1,0 +1,17 @@
+# Build artifacts
+bin/
+/aurelia
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Test artifacts
+*.tmp
+*.log
