@@ -16,6 +16,7 @@ type Daemon struct {
 	specDir  string
 	secrets  keychain.Store
 	services map[string]*ManagedService
+	deps     *depGraph
 	mu       sync.RWMutex
 	logger   *slog.Logger
 }
@@ -44,7 +45,7 @@ func WithSecrets(s keychain.Store) DaemonOption {
 	}
 }
 
-// Start loads all specs and starts all services.
+// Start loads all specs and starts all services in dependency order.
 func (d *Daemon) Start(ctx context.Context) error {
 	specs, err := spec.LoadDir(d.specDir)
 	if err != nil {
@@ -53,17 +54,57 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	d.logger.Info("loaded service specs", "count", len(specs), "dir", d.specDir)
 
-	for _, s := range specs {
+	g := newDepGraph(specs)
+	d.mu.Lock()
+	d.deps = g
+	d.mu.Unlock()
+
+	order, err := g.startOrder()
+	if err != nil {
+		return fmt.Errorf("dependency resolution: %w", err)
+	}
+
+	d.logger.Info("start order resolved", "order", order)
+
+	for _, name := range order {
+		s := g.specs[name]
 		if err := d.startService(ctx, s); err != nil {
-			d.logger.Error("failed to start service", "service", s.Service.Name, "error", err)
+			d.logger.Error("failed to start service", "service", name, "error", err)
 		}
 	}
 
 	return nil
 }
 
-// Stop gracefully stops all services.
+// Stop gracefully stops all services in reverse dependency order.
 func (d *Daemon) Stop(timeout time.Duration) {
+	d.mu.RLock()
+	g := d.deps
+	d.mu.RUnlock()
+
+	// If we have a dependency graph, stop in reverse order (dependents first)
+	if g != nil {
+		order, err := g.stopOrder()
+		if err == nil {
+			for _, name := range order {
+				d.mu.RLock()
+				ms, ok := d.services[name]
+				d.mu.RUnlock()
+				if !ok {
+					continue
+				}
+				d.logger.Info("stopping service", "service", name)
+				if err := ms.Stop(timeout); err != nil {
+					d.logger.Error("error stopping service", "service", name, "error", err)
+				}
+			}
+			d.logger.Info("all services stopped")
+			return
+		}
+		d.logger.Warn("stop order failed, falling back to parallel stop", "error", err)
+	}
+
+	// Fallback: parallel stop (no dependency info)
 	d.mu.RLock()
 	services := make([]*ManagedService, 0, len(d.services))
 	for _, ms := range d.services {
@@ -99,14 +140,31 @@ func (d *Daemon) StartService(ctx context.Context, name string) error {
 	return ms.Start(ctx)
 }
 
-// StopService stops a single service by name.
+// StopService stops a single service by name, cascading to hard dependents.
 func (d *Daemon) StopService(name string, timeout time.Duration) error {
 	d.mu.RLock()
 	ms, ok := d.services[name]
+	g := d.deps
 	d.mu.RUnlock()
 
 	if !ok {
 		return fmt.Errorf("service %q not found", name)
+	}
+
+	// Cascade stop: first stop services that hard-depend on this one
+	if g != nil {
+		targets := g.cascadeStopTargets(name)
+		for _, dep := range targets {
+			d.mu.RLock()
+			depMs, exists := d.services[dep]
+			d.mu.RUnlock()
+			if exists {
+				d.logger.Info("cascade stopping dependent", "service", dep, "because", name)
+				if err := depMs.Stop(timeout); err != nil {
+					d.logger.Error("error cascade stopping", "service", dep, "error", err)
+				}
+			}
+		}
 	}
 
 	return ms.Stop(timeout)
@@ -154,6 +212,9 @@ func (d *Daemon) Reload(ctx context.Context) (*ReloadResult, error) {
 
 	result := &ReloadResult{}
 
+	// Rebuild dependency graph
+	g := newDepGraph(specs)
+
 	newSpecs := make(map[string]*spec.ServiceSpec)
 	for _, s := range specs {
 		newSpecs[s.Service.Name] = s
@@ -161,6 +222,8 @@ func (d *Daemon) Reload(ctx context.Context) (*ReloadResult, error) {
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
+	d.deps = g
 
 	// Stop removed services
 	for name, ms := range d.services {
