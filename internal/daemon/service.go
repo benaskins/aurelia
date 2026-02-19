@@ -46,8 +46,11 @@ type ManagedService struct {
 // NewManagedService creates a managed service from a spec.
 // The secrets store is optional — if nil, secret refs in the spec are skipped.
 func NewManagedService(s *spec.ServiceSpec, secrets keychain.Store) (*ManagedService, error) {
-	if s.Service.Type != "native" {
-		return nil, fmt.Errorf("only native services are supported (got %q)", s.Service.Type)
+	switch s.Service.Type {
+	case "native", "container":
+		// supported
+	default:
+		return nil, fmt.Errorf("unsupported service type %q (expected native or container)", s.Service.Type)
 	}
 
 	return &ManagedService{
@@ -296,7 +299,39 @@ func (ms *ManagedService) startHealthMonitor(ctx context.Context) *health.Monito
 }
 
 func (ms *ManagedService) createDriver() driver.Driver {
-	env := os.Environ()
+	env := ms.buildEnv()
+
+	switch ms.spec.Service.Type {
+	case "container":
+		d, err := driver.NewContainer(driver.ContainerConfig{
+			Name:        ms.spec.Service.Name,
+			Image:       ms.spec.Service.Image,
+			Env:         env,
+			NetworkMode: ms.spec.Service.NetworkMode,
+			Volumes:     ms.spec.Volumes,
+		})
+		if err != nil {
+			ms.logger.Error("failed to create container driver", "error", err)
+			// Fall through — the start will fail gracefully
+			return driver.NewNative(driver.NativeConfig{Command: "false"})
+		}
+		return d
+	default:
+		return driver.NewNative(driver.NativeConfig{
+			Command:    ms.spec.Service.Command,
+			Env:        env,
+			WorkingDir: ms.spec.Service.WorkingDir,
+		})
+	}
+}
+
+func (ms *ManagedService) buildEnv() []string {
+	// For native: inherit host env. For containers: clean env.
+	var env []string
+	if ms.spec.Service.Type == "native" {
+		env = os.Environ()
+	}
+
 	for k, v := range ms.spec.Env {
 		env = append(env, k+"="+v)
 	}
@@ -314,11 +349,7 @@ func (ms *ManagedService) createDriver() driver.Driver {
 		}
 	}
 
-	return driver.NewNative(driver.NativeConfig{
-		Command:    ms.spec.Service.Command,
-		Env:        env,
-		WorkingDir: ms.spec.Service.WorkingDir,
-	})
+	return env
 }
 
 func (ms *ManagedService) shouldRestart() bool {

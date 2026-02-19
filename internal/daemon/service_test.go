@@ -272,18 +272,17 @@ func TestManagedServiceHealthState(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 }
 
-func TestManagedServiceRejectsContainer(t *testing.T) {
+func TestManagedServiceRejectsUnknownType(t *testing.T) {
 	s := &spec.ServiceSpec{
 		Service: spec.Service{
-			Name:  "test-container",
-			Type:  "container",
-			Image: "foo:bar",
+			Name: "test-unknown",
+			Type: "potato",
 		},
 	}
 
 	_, err := NewManagedService(s, nil)
 	if err == nil {
-		t.Error("expected error for container service")
+		t.Error("expected error for unknown service type")
 	}
 }
 
