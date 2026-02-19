@@ -36,6 +36,10 @@ restart:
   max_delay: 5m
   reset_after: 10m
 
+routing:
+  hostname: chat.studio.internal
+  tls: true
+
 env:
   PORT: "8090"
   OLLAMA_HOST: http://127.0.0.1:11434
@@ -126,6 +130,15 @@ dependencies:
 	}
 	if len(spec.Dependencies.Requires) != 1 || spec.Dependencies.Requires[0] != "postgres" {
 		t.Errorf("expected requires [postgres], got %v", spec.Dependencies.Requires)
+	}
+	if spec.Routing == nil {
+		t.Fatal("expected routing block")
+	}
+	if spec.Routing.Hostname != "chat.studio.internal" {
+		t.Errorf("expected hostname 'chat.studio.internal', got %q", spec.Routing.Hostname)
+	}
+	if !spec.Routing.TLS {
+		t.Error("expected tls true")
 	}
 }
 
@@ -274,6 +287,66 @@ func TestValidateRestartPolicy(t *testing.T) {
 	s.Restart = &RestartPolicy{Policy: "always", Backoff: "invalid"}
 	if err := s.Validate(); err == nil {
 		t.Error("expected error for invalid backoff type")
+	}
+}
+
+func TestValidateRoutingRequiresHostname(t *testing.T) {
+	spec := &ServiceSpec{
+		Service: Service{Name: "test", Type: "native", Command: "echo"},
+		Network: &Network{Port: 8080},
+		Routing: &Routing{TLS: true},
+	}
+	if err := spec.Validate(); err == nil {
+		t.Error("expected error for routing without hostname")
+	}
+}
+
+func TestValidateRoutingRequiresPort(t *testing.T) {
+	spec := &ServiceSpec{
+		Service: Service{Name: "test", Type: "native", Command: "echo"},
+		Routing: &Routing{Hostname: "test.studio.internal"},
+	}
+	if err := spec.Validate(); err == nil {
+		t.Error("expected error for routing without port")
+	}
+}
+
+func TestValidateRoutingAcceptsHealthPort(t *testing.T) {
+	spec := &ServiceSpec{
+		Service: Service{Name: "test", Type: "native", Command: "echo"},
+		Health:  &HealthCheck{Type: "http", Path: "/health", Port: 8080, Interval: Duration{10 * time.Second}, Timeout: Duration{2 * time.Second}},
+		Routing: &Routing{Hostname: "test.studio.internal"},
+	}
+	if err := spec.Validate(); err != nil {
+		t.Errorf("routing with health port should be valid: %v", err)
+	}
+}
+
+func TestValidateRoutingWithTLSOptions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "signal.yaml")
+	data := `
+service:
+  name: signal-api
+  type: container
+  image: signal:latest
+
+network:
+  port: 8093
+
+routing:
+  hostname: signal-api.studio.internal
+  tls: true
+  tls_options: mtls
+`
+	os.WriteFile(path, []byte(data), 0644)
+
+	spec, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spec.Routing.TLSOptions != "mtls" {
+		t.Errorf("expected tls_options 'mtls', got %q", spec.Routing.TLSOptions)
 	}
 }
 

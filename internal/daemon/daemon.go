@@ -9,6 +9,7 @@ import (
 
 	"github.com/benaskins/aurelia/internal/driver"
 	"github.com/benaskins/aurelia/internal/keychain"
+	"github.com/benaskins/aurelia/internal/routing"
 	"github.com/benaskins/aurelia/internal/spec"
 )
 
@@ -17,6 +18,7 @@ type Daemon struct {
 	specDir  string
 	stateDir string
 	secrets  keychain.Store
+	routing  *routing.TraefikGenerator
 	services map[string]*ManagedService
 	deps     *depGraph
 	state    *stateFile
@@ -54,6 +56,13 @@ func WithSecrets(s keychain.Store) DaemonOption {
 func WithStateDir(dir string) DaemonOption {
 	return func(d *Daemon) {
 		d.stateDir = dir
+	}
+}
+
+// WithRouting enables Traefik config generation at the given output path.
+func WithRouting(outputPath string) DaemonOption {
+	return func(d *Daemon) {
+		d.routing = routing.NewTraefikGenerator(outputPath)
 	}
 }
 
@@ -104,7 +113,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 		}
 	}
 
-	// Clean up state file — it will be rebuilt by running services
+	// Generate initial routing config
+	d.regenerateRouting()
+
 	return nil
 }
 
@@ -199,7 +210,9 @@ func (d *Daemon) StopService(name string, timeout time.Duration) error {
 		}
 	}
 
-	return ms.Stop(timeout)
+	err := ms.Stop(timeout)
+	d.regenerateRouting()
+	return err
 }
 
 // RestartService stops and restarts a service.
@@ -279,6 +292,9 @@ func (d *Daemon) Reload(ctx context.Context) (*ReloadResult, error) {
 		}
 	}
 
+	// Regenerate routing after reconciliation (lock is held, call unlocked version)
+	go d.regenerateRouting()
+
 	return result, nil
 }
 
@@ -306,6 +322,7 @@ func (d *Daemon) startServiceLocked(ctx context.Context, s *spec.ServiceSpec) er
 		if err := d.state.set(name, rec); err != nil {
 			d.logger.Warn("failed to save service state", "service", name, "error", err)
 		}
+		d.regenerateRouting()
 	}
 
 	if err := ms.Start(ctx); err != nil {
@@ -315,6 +332,53 @@ func (d *Daemon) startServiceLocked(ctx context.Context, s *spec.ServiceSpec) er
 	d.services[s.Service.Name] = ms
 	d.logger.Info("started service", "service", s.Service.Name, "type", s.Service.Type)
 	return nil
+}
+
+// regenerateRouting collects routing info from all running services and
+// writes a Traefik dynamic config file. No-op if routing is not configured.
+func (d *Daemon) regenerateRouting() {
+	if d.routing == nil {
+		return
+	}
+
+	d.mu.RLock()
+	var routes []routing.ServiceRoute
+	for _, ms := range d.services {
+		if ms.spec.Routing == nil {
+			continue
+		}
+		// Only include running services
+		state := ms.State()
+		if state.State != driver.StateRunning {
+			continue
+		}
+
+		port := 0
+		if ms.spec.Network != nil {
+			port = ms.spec.Network.Port
+		}
+		if port == 0 && ms.spec.Health != nil {
+			port = ms.spec.Health.Port
+		}
+		if port == 0 {
+			continue
+		}
+
+		routes = append(routes, routing.ServiceRoute{
+			Name:       ms.spec.Service.Name,
+			Hostname:   ms.spec.Routing.Hostname,
+			Port:       port,
+			TLS:        ms.spec.Routing.TLS,
+			TLSOptions: ms.spec.Routing.TLSOptions,
+		})
+	}
+	d.mu.RUnlock()
+
+	if err := d.routing.Generate(routes); err != nil {
+		d.logger.Error("failed to regenerate routing config", "error", err)
+	} else {
+		d.logger.Info("regenerated routing config", "routes", len(routes), "path", d.routing.OutputPath())
+	}
 }
 
 func (d *Daemon) adoptService(ctx context.Context, s *spec.ServiceSpec, drv driver.Driver) error {
@@ -330,6 +394,7 @@ func (d *Daemon) adoptService(ctx context.Context, s *spec.ServiceSpec, drv driv
 		if err := d.state.set(name, rec); err != nil {
 			d.logger.Warn("failed to save service state", "service", name, "error", err)
 		}
+		d.regenerateRouting()
 	}
 
 	if err := ms.Start(ctx); err != nil {

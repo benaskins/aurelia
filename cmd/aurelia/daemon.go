@@ -25,10 +25,14 @@ var daemonCmd = &cobra.Command{
 	RunE:  runDaemon,
 }
 
-var apiAddr string
+var (
+	apiAddr       string
+	routingOutput string
+)
 
 func init() {
 	daemonCmd.Flags().StringVar(&apiAddr, "api-addr", "", "Optional TCP address for API (e.g. 127.0.0.1:9090)")
+	daemonCmd.Flags().StringVar(&routingOutput, "routing-output", "", "Path to write Traefik dynamic config (enables routing)")
 	rootCmd.AddCommand(daemonCmd)
 }
 
@@ -52,7 +56,12 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	// Create and start daemon with Keychain secret store
 	secrets := keychain.NewKeychainStore()
 	stateDir := filepath.Join(filepath.Dir(specDir))
-	d := daemon.NewDaemon(specDir, daemon.WithSecrets(secrets), daemon.WithStateDir(stateDir))
+	opts := []daemon.DaemonOption{daemon.WithSecrets(secrets), daemon.WithStateDir(stateDir)}
+	if routingOutput != "" {
+		opts = append(opts, daemon.WithRouting(routingOutput))
+		slog.Info("routing enabled", "output", routingOutput)
+	}
+	d := daemon.NewDaemon(specDir, opts...)
 	if err := d.Start(ctx); err != nil {
 		return fmt.Errorf("starting daemon: %w", err)
 	}

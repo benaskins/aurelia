@@ -199,6 +199,75 @@ service:
 	}
 }
 
+func TestDaemonRoutingGeneration(t *testing.T) {
+	dir := t.TempDir()
+	routingPath := filepath.Join(t.TempDir(), "traefik", "aurelia.yaml")
+
+	writeSpec(t, dir, "chat.yaml", `
+service:
+  name: chat
+  type: native
+  command: "sleep 30"
+
+network:
+  port: 8090
+
+routing:
+  hostname: chat.studio.internal
+  tls: true
+`)
+
+	writeSpec(t, dir, "plain.yaml", `
+service:
+  name: plain
+  type: native
+  command: "sleep 30"
+`)
+
+	d := NewDaemon(dir, WithRouting(routingPath))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+
+	// Wait for onStarted callback to fire
+	time.Sleep(200 * time.Millisecond)
+
+	// Check that routing config was generated
+	data, err := os.ReadFile(routingPath)
+	if err != nil {
+		t.Fatalf("routing config not written: %v", err)
+	}
+
+	content := string(data)
+	if !containsAll(content, "chat.studio.internal", "8090", "websecure") {
+		t.Errorf("routing config missing expected content:\n%s", content)
+	}
+	// plain service has no routing — should not appear
+	if containsAll(content, "plain") {
+		t.Errorf("plain service should not appear in routing config:\n%s", content)
+	}
+}
+
+func containsAll(s string, substrs ...string) bool {
+	for _, sub := range substrs {
+		found := false
+		for i := 0; i <= len(s)-len(sub); i++ {
+			if s[i:i+len(sub)] == sub {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
 func TestDaemonEmptyDir(t *testing.T) {
 	dir := t.TempDir()
 

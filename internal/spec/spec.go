@@ -13,6 +13,7 @@ import (
 type ServiceSpec struct {
 	Service      Service              `yaml:"service"`
 	Network      *Network             `yaml:"network,omitempty"`
+	Routing      *Routing             `yaml:"routing,omitempty"`
 	Health       *HealthCheck         `yaml:"health,omitempty"`
 	Restart      *RestartPolicy       `yaml:"restart,omitempty"`
 	Env          map[string]string    `yaml:"env,omitempty"`
@@ -59,6 +60,12 @@ type SecretRef struct {
 	Keychain      string `yaml:"keychain"`
 	RotateEvery   string `yaml:"rotate_every,omitempty"`
 	RotateCommand string `yaml:"rotate_command,omitempty"`
+}
+
+type Routing struct {
+	Hostname   string `yaml:"hostname"`
+	TLS        bool   `yaml:"tls,omitempty"`
+	TLSOptions string `yaml:"tls_options,omitempty"` // e.g. "mtls" for mTLS enforcement
 }
 
 type Dependencies struct {
@@ -197,6 +204,23 @@ func (s *ServiceSpec) Validate() error {
 			default:
 				return fmt.Errorf("restart.backoff must be \"fixed\" or \"exponential\", got %q", r.Backoff)
 			}
+		}
+	}
+
+	if r := s.Routing; r != nil {
+		if r.Hostname == "" {
+			return fmt.Errorf("routing.hostname is required")
+		}
+		// Routing requires a port (from network block or health block)
+		port := 0
+		if s.Network != nil {
+			port = s.Network.Port
+		}
+		if port == 0 && s.Health != nil {
+			port = s.Health.Port
+		}
+		if port == 0 {
+			return fmt.Errorf("routing requires a network.port")
 		}
 	}
 
