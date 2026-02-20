@@ -174,10 +174,13 @@ func (d *NativeDriver) Info() ProcessInfo {
 }
 
 func (d *NativeDriver) Wait() (int, error) {
-	if d.done == nil {
+	d.mu.Lock()
+	done := d.done
+	d.mu.Unlock()
+	if done == nil {
 		return -1, fmt.Errorf("process not started")
 	}
-	<-d.done
+	<-done
 
 	d.mu.Lock()
 	defer d.mu.Unlock()

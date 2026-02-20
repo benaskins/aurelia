@@ -49,7 +49,9 @@ func NewObserver(interval time.Duration) *Observer {
 // Start begins polling GPU state in the background.
 func (o *Observer) Start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
+	o.mu.Lock()
 	o.cancel = cancel
+	o.mu.Unlock()
 
 	// Initial poll
 	o.poll()
@@ -71,8 +73,11 @@ func (o *Observer) Start(ctx context.Context) {
 
 // Stop stops the observer.
 func (o *Observer) Stop() {
-	if o.cancel != nil {
-		o.cancel()
+	o.mu.Lock()
+	cancel := o.cancel
+	o.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"time"
 
@@ -164,7 +163,15 @@ func (d *ContainerDriver) Stop(ctx context.Context, timeout time.Duration) error
 	// Remove the container
 	d.client.ContainerRemove(context.Background(), containerID, container.RemoveOptions{})
 
+	// Close the Docker client to release resources
+	d.client.Close()
+
 	return nil
+}
+
+// Close releases the Docker client connection.
+func (d *ContainerDriver) Close() error {
+	return d.client.Close()
 }
 
 func (d *ContainerDriver) Info() ProcessInfo {
@@ -180,10 +187,13 @@ func (d *ContainerDriver) Info() ProcessInfo {
 }
 
 func (d *ContainerDriver) Wait() (int, error) {
-	if d.done == nil {
+	d.mu.Lock()
+	done := d.done
+	d.mu.Unlock()
+	if done == nil {
 		return -1, fmt.Errorf("container not started")
 	}
-	<-d.done
+	<-done
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -271,14 +281,4 @@ func (d *ContainerDriver) ContainerID() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.containerID
-}
-
-// parseImageName extracts the image name without tag for container naming.
-func parseImageName(image string) string {
-	// Remove tag
-	parts := strings.SplitN(image, ":", 2)
-	name := parts[0]
-	// Remove registry prefix
-	parts = strings.Split(name, "/")
-	return parts[len(parts)-1]
 }

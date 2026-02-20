@@ -8,8 +8,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"text/tabwriter"
+	"time"
 
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/gpu"
@@ -19,6 +19,7 @@ import (
 func apiClient() *http.Client {
 	socketPath := defaultSocketPath()
 	return &http.Client{
+		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				return net.Dial("unix", socketPath)
@@ -27,7 +28,7 @@ func apiClient() *http.Client {
 	}
 }
 
-func apiGet(path string, v interface{}) error {
+func apiGet(path string, v any) error {
 	resp, err := apiClient().Get("http://aurelia" + path)
 	if err != nil {
 		return fmt.Errorf("connecting to daemon: %w (is aurelia daemon running?)", err)
@@ -42,15 +43,17 @@ func apiGet(path string, v interface{}) error {
 	return json.NewDecoder(resp.Body).Decode(v)
 }
 
-func apiPost(path string) (map[string]interface{}, error) {
+func apiPost(path string) (map[string]any, error) {
 	resp, err := apiClient().Post("http://aurelia"+path, "application/json", nil)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to daemon: %w (is aurelia daemon running?)", err)
 	}
 	defer resp.Body.Close()
 
-	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
 
 	if resp.StatusCode >= 400 {
 		if msg, ok := result["error"]; ok {
@@ -184,7 +187,7 @@ var reloadCmd = &cobra.Command{
 	Short: "Reload service specs",
 	Long:  "Re-read spec files and reconcile: start new services, stop removed ones.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var result map[string]interface{}
+		var result map[string]any
 		resp, err := apiClient().Post("http://aurelia/v1/reload", "application/json", nil)
 		if err != nil {
 			return fmt.Errorf("connecting to daemon: %w", err)
@@ -211,12 +214,4 @@ func init() {
 	rootCmd.AddCommand(downCmd)
 	rootCmd.AddCommand(restartCmd)
 	rootCmd.AddCommand(reloadCmd)
-}
-
-func defaultSpecDirFromHome() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "."
-	}
-	return filepath.Join(home, ".aurelia", "services")
 }

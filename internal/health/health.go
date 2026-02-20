@@ -42,8 +42,9 @@ type Result struct {
 
 // Monitor runs periodic health checks and tracks state.
 type Monitor struct {
-	cfg    Config
-	logger *slog.Logger
+	cfg        Config
+	logger     *slog.Logger
+	httpClient *http.Client
 
 	mu               sync.Mutex
 	status           Status
@@ -64,6 +65,7 @@ func NewMonitor(cfg Config, logger *slog.Logger, onUnhealthy func()) *Monitor {
 	return &Monitor{
 		cfg:         cfg,
 		logger:      logger,
+		httpClient:  &http.Client{Timeout: cfg.Timeout},
 		status:      StatusUnknown,
 		onUnhealthy: onUnhealthy,
 	}
@@ -194,19 +196,20 @@ func (m *Monitor) check(ctx context.Context) {
 	}
 
 	newStatus := m.status
+	consecutiveFails := m.consecutiveFails
 	m.mu.Unlock()
 
 	if result.Status != StatusHealthy {
 		m.logger.Warn("health check failed",
 			"error", result.Message,
-			"consecutive_fails", m.consecutiveFails,
+			"consecutive_fails", consecutiveFails,
 			"threshold", m.cfg.UnhealthyThreshold,
 		)
 	}
 
 	// Fire callback on transition to unhealthy
 	if prevStatus != StatusUnhealthy && newStatus == StatusUnhealthy {
-		m.logger.Error("service is unhealthy", "consecutive_fails", m.consecutiveFails)
+		m.logger.Error("service is unhealthy", "consecutive_fails", consecutiveFails)
 		if m.onUnhealthy != nil {
 			m.onUnhealthy()
 		}
@@ -221,8 +224,7 @@ func (m *Monitor) checkHTTP(ctx context.Context) error {
 		return fmt.Errorf("creating request: %w", err)
 	}
 
-	client := &http.Client{Timeout: m.cfg.Timeout}
-	resp, err := client.Do(req)
+	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
