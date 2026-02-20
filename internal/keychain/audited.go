@@ -3,6 +3,7 @@ package keychain
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -33,7 +34,9 @@ func NewMetadataStore(path string) (*MetadataStore, error) {
 
 	data, err := os.ReadFile(path)
 	if err == nil {
-		json.Unmarshal(data, &ms.metadata)
+		if jsonErr := json.Unmarshal(data, &ms.metadata); jsonErr != nil {
+			slog.Warn("corrupt metadata file, starting fresh", "path", path, "error", jsonErr)
+		}
 	}
 	// File not existing is fine — start fresh.
 
@@ -102,9 +105,10 @@ func NewAuditedStore(inner Store, auditLog *audit.Logger, metadata *MetadataStor
 
 func (s *AuditedStore) Set(key, value string) error {
 	if err := s.inner.Set(key, value); err != nil {
-		return err
+		return fmt.Errorf("audited store set: %w", err)
 	}
 
+	// Audit logging is best-effort — a failure to log should not block the operation.
 	s.audit.Log(audit.Entry{
 		Action: audit.ActionSecretWrite,
 		Key:    key,
@@ -116,7 +120,9 @@ func (s *AuditedStore) Set(key, value string) error {
 	if meta == nil {
 		meta = &SecretMetadata{CreatedAt: now}
 	}
-	s.metadata.Set(key, meta)
+	if err := s.metadata.Set(key, meta); err != nil {
+		return fmt.Errorf("saving metadata: %w", err)
+	}
 
 	return nil
 }
@@ -124,9 +130,10 @@ func (s *AuditedStore) Set(key, value string) error {
 func (s *AuditedStore) Get(key string) (string, error) {
 	val, err := s.inner.Get(key)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("audited store get: %w", err)
 	}
 
+	// Audit logging is best-effort — a failure to log should not block the operation.
 	s.audit.Log(audit.Entry{
 		Action: audit.ActionSecretRead,
 		Key:    key,
@@ -142,26 +149,30 @@ func (s *AuditedStore) List() ([]string, error) {
 
 func (s *AuditedStore) Delete(key string) error {
 	if err := s.inner.Delete(key); err != nil {
-		return err
+		return fmt.Errorf("audited store delete: %w", err)
 	}
 
+	// Audit logging is best-effort — a failure to log should not block the operation.
 	s.audit.Log(audit.Entry{
 		Action: audit.ActionSecretDelete,
 		Key:    key,
 		Actor:  s.actor,
 	})
 
-	s.metadata.Delete(key)
+	if err := s.metadata.Delete(key); err != nil {
+		return fmt.Errorf("deleting metadata: %w", err)
+	}
 	return nil
 }
 
 func (s *AuditedStore) GetMultiple(keys []string) (map[string]string, error) {
 	result, err := s.inner.GetMultiple(keys)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("audited store get multiple: %w", err)
 	}
 
 	for key := range result {
+		// Audit logging is best-effort — a failure to log should not block the operation.
 		s.audit.Log(audit.Entry{
 			Action: audit.ActionSecretRead,
 			Key:    key,
@@ -176,9 +187,10 @@ func (s *AuditedStore) GetMultiple(keys []string) (map[string]string, error) {
 func (s *AuditedStore) GetForService(key, service string) (string, error) {
 	val, err := s.inner.Get(key)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("audited store get for service: %w", err)
 	}
 
+	// Audit logging is best-effort — a failure to log should not block the operation.
 	s.audit.Log(audit.Entry{
 		Action:  audit.ActionSecretRead,
 		Key:     key,
@@ -193,9 +205,10 @@ func (s *AuditedStore) GetForService(key, service string) (string, error) {
 // Rotate runs a rotation command, captures its output, stores the new value,
 // and logs the rotation.
 func (s *AuditedStore) Rotate(key, command string) error {
-	// Run the rotation command and capture stdout
+	// Run the rotation command and capture stdout.
 	output, err := runRotationCommand(command)
 	if err != nil {
+		// Audit logging is best-effort — a failure to log should not block the operation.
 		s.audit.Log(audit.Entry{
 			Action:  audit.ActionSecretRotate,
 			Key:     key,
@@ -212,6 +225,7 @@ func (s *AuditedStore) Rotate(key, command string) error {
 		return fmt.Errorf("storing rotated secret: %w", err)
 	}
 
+	// Audit logging is best-effort — a failure to log should not block the operation.
 	s.audit.Log(audit.Entry{
 		Action:  audit.ActionSecretRotate,
 		Key:     key,
@@ -227,7 +241,9 @@ func (s *AuditedStore) Rotate(key, command string) error {
 		meta = &SecretMetadata{CreatedAt: now}
 	}
 	meta.LastRotated = now
-	s.metadata.Set(key, meta)
+	if err := s.metadata.Set(key, meta); err != nil {
+		return fmt.Errorf("saving rotation metadata: %w", err)
+	}
 
 	return nil
 }

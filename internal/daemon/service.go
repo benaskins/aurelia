@@ -117,7 +117,9 @@ func (ms *ManagedService) Stop(timeout time.Duration) error {
 
 	// Stop the driver (graceful SIGTERM → SIGKILL)
 	if drv != nil {
-		drv.Stop(context.Background(), timeout)
+		if err := drv.Stop(context.Background(), timeout); err != nil {
+			ms.logger.Warn("error stopping service", "error", err)
+		}
 	}
 
 	// Then cancel the supervision loop

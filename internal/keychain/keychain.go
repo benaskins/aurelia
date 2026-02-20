@@ -9,6 +9,11 @@
 // never synced to iCloud, never available when the machine is locked.
 package keychain
 
+import "errors"
+
+// ErrNotFound is returned when a secret does not exist in the store.
+var ErrNotFound = errors.New("secret not found")
+
 // Store is the interface for secret storage operations.
 type Store interface {
 	Set(key, value string) error

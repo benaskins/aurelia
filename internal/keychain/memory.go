@@ -29,7 +29,7 @@ func (s *MemoryStore) Get(key string) (string, error) {
 	defer s.mu.RUnlock()
 	val, ok := s.secrets[key]
 	if !ok {
-		return "", fmt.Errorf("secret %q not found", key)
+		return "", fmt.Errorf("%w: %s", ErrNotFound, key)
 	}
 	return val, nil
 }

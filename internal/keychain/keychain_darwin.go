@@ -3,6 +3,7 @@
 package keychain
 
 import (
+	"errors"
 	"fmt"
 
 	gokeychain "github.com/keybase/go-keychain"
@@ -13,18 +14,18 @@ const (
 	ServiceName = "com.aurelia"
 )
 
-// KeychainStore provides CRUD operations for secrets in macOS Keychain.
-type KeychainStore struct {
+// SystemStore provides CRUD operations for secrets in macOS Keychain.
+type SystemStore struct {
 	service string
 }
 
-// NewKeychainStore creates a new Keychain-backed secret store.
-func NewKeychainStore() *KeychainStore {
-	return &KeychainStore{service: ServiceName}
+// NewSystemStore creates a new Keychain-backed secret store.
+func NewSystemStore() *SystemStore {
+	return &SystemStore{service: ServiceName}
 }
 
 // Set stores a secret in the Keychain. Overwrites if it already exists.
-func (s *KeychainStore) Set(key, value string) error {
+func (s *SystemStore) Set(key, value string) error {
 	// Try to delete existing item first (update = delete + add)
 	_ = s.Delete(key)
 
@@ -45,25 +46,25 @@ func (s *KeychainStore) Set(key, value string) error {
 }
 
 // Get retrieves a secret from the Keychain.
-func (s *KeychainStore) Get(key string) (string, error) {
+func (s *SystemStore) Get(key string) (string, error) {
 	data, err := gokeychain.GetGenericPassword(s.service, key, "", "")
 	if err != nil {
-		if err == gokeychain.ErrorItemNotFound {
-			return "", fmt.Errorf("secret %q not found", key)
+		if errors.Is(err, gokeychain.ErrorItemNotFound) {
+			return "", fmt.Errorf("%w: %s", ErrNotFound, key)
 		}
 		return "", fmt.Errorf("keychain get %q: %w", key, err)
 	}
 	if len(data) == 0 {
-		return "", fmt.Errorf("secret %q not found", key)
+		return "", fmt.Errorf("%w: %s", ErrNotFound, key)
 	}
 	return string(data), nil
 }
 
 // List returns all secret keys stored by aurelia.
-func (s *KeychainStore) List() ([]string, error) {
+func (s *SystemStore) List() ([]string, error) {
 	accounts, err := gokeychain.GetGenericPasswordAccounts(s.service)
 	if err != nil {
-		if err == gokeychain.ErrorItemNotFound {
+		if errors.Is(err, gokeychain.ErrorItemNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("keychain list: %w", err)
@@ -72,17 +73,17 @@ func (s *KeychainStore) List() ([]string, error) {
 }
 
 // Delete removes a secret from the Keychain.
-func (s *KeychainStore) Delete(key string) error {
+func (s *SystemStore) Delete(key string) error {
 	err := gokeychain.DeleteGenericPasswordItem(s.service, key)
-	if err != nil && err != gokeychain.ErrorItemNotFound {
+	if err != nil && !errors.Is(err, gokeychain.ErrorItemNotFound) {
 		return fmt.Errorf("keychain delete %q: %w", key, err)
 	}
 	return nil
 }
 
-// GetMultiple retrieves multiple secrets at once, returning a map of key→value.
+// GetMultiple retrieves multiple secrets at once, returning a map of key->value.
 // Missing keys are silently skipped.
-func (s *KeychainStore) GetMultiple(keys []string) (map[string]string, error) {
+func (s *SystemStore) GetMultiple(keys []string) (map[string]string, error) {
 	result := make(map[string]string, len(keys))
 	for _, key := range keys {
 		val, err := s.Get(key)
