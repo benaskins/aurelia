@@ -165,6 +165,10 @@ func (d *AdoptedDriver) Stdout() io.Reader {
 	return d.buf.Reader()
 }
 
+func (d *AdoptedDriver) LogLines(n int) []string {
+	return nil
+}
+
 // VerifyProcess checks whether the process at the given PID matches the expected
 // command name. This guards against PID reuse: if the OS recycled the PID for a
 // different process, the command won't match and adoption should be skipped.

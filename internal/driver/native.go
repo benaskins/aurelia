@@ -190,3 +190,7 @@ func (d *NativeDriver) Wait() (int, error) {
 func (d *NativeDriver) Stdout() io.Reader {
 	return d.buf.Reader()
 }
+
+func (d *NativeDriver) LogLines(n int) []string {
+	return d.buf.Last(n)
+}

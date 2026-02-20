@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +45,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	mux.HandleFunc("POST /v1/services/{name}/start", s.startService)
 	mux.HandleFunc("POST /v1/services/{name}/stop", s.stopService)
 	mux.HandleFunc("POST /v1/services/{name}/restart", s.restartService)
+	mux.HandleFunc("GET /v1/services/{name}/logs", s.serviceLogs)
 	mux.HandleFunc("POST /v1/reload", s.reload)
 	mux.HandleFunc("GET /v1/gpu", s.gpuInfo)
 	mux.HandleFunc("GET /v1/health", s.health)
@@ -185,6 +187,22 @@ func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
+}
+
+func (s *Server) serviceLogs(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	n := 100
+	if qn := r.URL.Query().Get("n"); qn != "" {
+		if parsed, err := strconv.Atoi(qn); err == nil && parsed > 0 {
+			n = parsed
+		}
+	}
+	lines, err := s.daemon.ServiceLogs(name, n)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": errorMessage("service not found", err, r)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"lines": lines})
 }
 
 func (s *Server) reload(w http.ResponseWriter, r *http.Request) {

@@ -45,4 +45,7 @@ type Driver interface {
 
 	// Stdout returns a reader for the process's combined stdout/stderr output.
 	Stdout() io.Reader
+
+	// LogLines returns the last n lines from the log buffer.
+	LogLines(n int) []string
 }

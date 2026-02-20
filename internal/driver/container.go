@@ -212,6 +212,10 @@ func (d *ContainerDriver) Stdout() io.Reader {
 	return d.buf.Reader()
 }
 
+func (d *ContainerDriver) LogLines(n int) []string {
+	return d.buf.Last(n)
+}
+
 func (d *ContainerDriver) streamLogs(ctx context.Context) {
 	opts := container.LogsOptions{
 		ShowStdout: true,

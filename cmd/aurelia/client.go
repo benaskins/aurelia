@@ -8,10 +8,12 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"text/tabwriter"
 	"time"
 
 	"github.com/benaskins/aurelia/internal/daemon"
+	"github.com/benaskins/aurelia/internal/driver"
 	"github.com/benaskins/aurelia/internal/gpu"
 	"github.com/spf13/cobra"
 )
@@ -98,6 +100,17 @@ var statusCmd = &cobra.Command{
 		}
 		w.Flush()
 
+		// Show details for failed services
+		for _, s := range states {
+			if s.State == driver.StateFailed {
+				detail := fmt.Sprintf("\n%s: exit %d", s.Name, s.LastExitCode)
+				if s.LastError != "" {
+					detail += fmt.Sprintf(" — %s", s.LastError)
+				}
+				fmt.Println(detail)
+			}
+		}
+
 		// GPU summary line
 		gpuInfo := gpu.QueryNow()
 		if gpuInfo.Name != "" {
@@ -111,8 +124,9 @@ var statusCmd = &cobra.Command{
 
 // up command
 var upCmd = &cobra.Command{
-	Use:   "up [service...]",
-	Short: "Start services",
+	Use:     "up [service...]",
+	Aliases: []string{"start"},
+	Short:   "Start services",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			// Start all — reload picks up everything
@@ -138,8 +152,9 @@ var upCmd = &cobra.Command{
 
 // down command
 var downCmd = &cobra.Command{
-	Use:   "down [service...]",
-	Short: "Stop services",
+	Use:     "down [service...]",
+	Aliases: []string{"stop"},
+	Short:   "Stop services",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			// Stop all
@@ -196,17 +211,43 @@ var reloadCmd = &cobra.Command{
 		if removed, ok := result["removed"]; ok {
 			fmt.Printf("Removed: %v\n", removed)
 		}
-		if result["added"] == nil && result["removed"] == nil {
+		if restarted, ok := result["restarted"]; ok {
+			fmt.Printf("Restarted: %v\n", restarted)
+		}
+		if result["added"] == nil && result["removed"] == nil && result["restarted"] == nil {
 			fmt.Println("No changes")
 		}
 		return nil
 	},
 }
 
+// logs command
+var logsCmd = &cobra.Command{
+	Use:   "logs <service>",
+	Short: "Show recent log output for a service",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		n, _ := cmd.Flags().GetInt("lines")
+		var resp struct {
+			Lines []string `json:"lines"`
+		}
+		if err := apiGet(fmt.Sprintf("/v1/services/%s/logs?n=%s", args[0], strconv.Itoa(n)), &resp); err != nil {
+			return err
+		}
+		for _, line := range resp.Lines {
+			fmt.Println(line)
+		}
+		return nil
+	},
+}
+
 func init() {
+	logsCmd.Flags().IntP("lines", "n", 50, "number of lines to show")
+
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(upCmd)
 	rootCmd.AddCommand(downCmd)
 	rootCmd.AddCommand(restartCmd)
 	rootCmd.AddCommand(reloadCmd)
+	rootCmd.AddCommand(logsCmd)
 }

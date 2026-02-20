@@ -278,6 +278,17 @@ func (d *Daemon) RestartService(name string, timeout time.Duration) error {
 	if err := d.StopService(name, timeout); err != nil {
 		return err
 	}
+
+	// Reset restart counter so the service gets a fresh set of attempts
+	d.mu.RLock()
+	ms, ok := d.services[name]
+	d.mu.RUnlock()
+	if ok {
+		ms.mu.Lock()
+		ms.restartCount = 0
+		ms.mu.Unlock()
+	}
+
 	return d.StartService(d.ctx, name)
 }
 
@@ -291,6 +302,19 @@ func (d *Daemon) ServiceStates() []ServiceState {
 		states = append(states, ms.State())
 	}
 	return states
+}
+
+// ServiceLogs returns the last n log lines for a service.
+func (d *Daemon) ServiceLogs(name string, n int) ([]string, error) {
+	d.mu.RLock()
+	ms, ok := d.services[name]
+	d.mu.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("service %q not found", name)
+	}
+
+	return ms.Logs(n), nil
 }
 
 // ServiceState returns the state of a single service.

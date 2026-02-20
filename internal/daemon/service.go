@@ -24,6 +24,7 @@ type ServiceState struct {
 	Port         int           `json:"port,omitempty"`
 	Uptime       string        `json:"uptime,omitempty"`
 	RestartCount int           `json:"restart_count"`
+	LastExitCode int           `json:"last_exit_code,omitempty"`
 	LastError    string        `json:"last_error,omitempty"`
 }
 
@@ -136,6 +137,18 @@ func (ms *ManagedService) Stop(timeout time.Duration) error {
 	}
 }
 
+// Logs returns the last n lines from the service log buffer.
+func (ms *ManagedService) Logs(n int) []string {
+	ms.mu.Lock()
+	drv := ms.drv
+	ms.mu.Unlock()
+
+	if drv == nil {
+		return nil
+	}
+	return drv.LogLines(n)
+}
+
 // State returns the current service state.
 func (ms *ManagedService) State() ServiceState {
 	ms.mu.Lock()
@@ -157,6 +170,7 @@ func (ms *ManagedService) State() ServiceState {
 		info := ms.drv.Info()
 		st.State = info.State
 		st.PID = info.PID
+		st.LastExitCode = info.ExitCode
 		st.LastError = info.Error
 		if info.State == driver.StateRunning && !info.StartedAt.IsZero() {
 			st.Uptime = time.Since(info.StartedAt).Truncate(time.Second).String()
