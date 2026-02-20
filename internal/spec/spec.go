@@ -21,6 +21,7 @@ type ServiceSpec struct {
 	EnvFile      []string             `yaml:"env_file,omitempty"`
 	Volumes      map[string]string    `yaml:"volumes,omitempty"`
 	Dependencies *Dependencies        `yaml:"dependencies,omitempty"`
+	Args         []string             `yaml:"args,omitempty"`
 }
 
 type Service struct {
@@ -140,6 +141,12 @@ func LoadDir(dir string) ([]*ServiceSpec, error) {
 	return specs, nil
 }
 
+// NeedsDynamicPort returns true when the spec has a network block with port 0,
+// indicating the daemon should allocate a port at runtime.
+func (s *ServiceSpec) NeedsDynamicPort() bool {
+	return s.Network != nil && s.Network.Port == 0
+}
+
 // Validate checks that a service spec is well-formed.
 func (s *ServiceSpec) Validate() error {
 	if s.Service.Name == "" {
@@ -211,15 +218,17 @@ func (s *ServiceSpec) Validate() error {
 		if r.Hostname == "" {
 			return fmt.Errorf("routing.hostname is required")
 		}
-		// Routing requires a port (from network block or health block)
-		port := 0
+		// Routing requires a port source: static network.port, dynamic (port 0
+		// with network block — resolved at runtime), or health.port.
+		hasPort := false
 		if s.Network != nil {
-			port = s.Network.Port
+			// port 0 means dynamic allocation — valid, resolved at runtime
+			hasPort = true
 		}
-		if port == 0 && s.Health != nil {
-			port = s.Health.Port
+		if !hasPort && s.Health != nil && s.Health.Port > 0 {
+			hasPort = true
 		}
-		if port == 0 {
+		if !hasPort {
 			return fmt.Errorf("routing requires a network.port")
 		}
 	}

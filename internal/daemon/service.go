@@ -21,6 +21,7 @@ type ServiceState struct {
 	State        driver.State  `json:"state"`
 	Health       health.Status `json:"health"`
 	PID          int           `json:"pid,omitempty"`
+	Port         int           `json:"port,omitempty"`
 	Uptime       string        `json:"uptime,omitempty"`
 	RestartCount int           `json:"restart_count"`
 	LastError    string        `json:"last_error,omitempty"`
@@ -45,6 +46,8 @@ type ManagedService struct {
 	unhealthyCh chan struct{}
 	// adoptedDrv is set when recovering a previously-running process
 	adoptedDrv driver.Driver
+	// allocatedPort is set when the service uses dynamic port allocation
+	allocatedPort int
 }
 
 // NewManagedService creates a managed service from a spec.
@@ -63,6 +66,18 @@ func NewManagedService(s *spec.ServiceSpec, secrets keychain.Store) (*ManagedSer
 		logger:      slog.With("service", s.Service.Name),
 		unhealthyCh: make(chan struct{}, 1),
 	}, nil
+}
+
+// EffectivePort returns the dynamically allocated port if set,
+// otherwise the static port from the spec.
+func (ms *ManagedService) EffectivePort() int {
+	if ms.allocatedPort != 0 {
+		return ms.allocatedPort
+	}
+	if ms.spec.Network != nil {
+		return ms.spec.Network.Port
+	}
+	return 0
 }
 
 // Start begins running the service with restart supervision.
@@ -125,6 +140,7 @@ func (ms *ManagedService) State() ServiceState {
 	st := ServiceState{
 		Name:         ms.spec.Service.Name,
 		Type:         ms.spec.Service.Type,
+		Port:         ms.EffectivePort(),
 		RestartCount: ms.restartCount,
 		Health:       health.StatusUnknown,
 	}
@@ -290,8 +306,8 @@ func (ms *ManagedService) startHealthMonitor(ctx context.Context) *health.Monito
 
 	h := ms.spec.Health
 	port := h.Port
-	if port == 0 && ms.spec.Network != nil {
-		port = ms.spec.Network.Port
+	if port == 0 {
+		port = ms.EffectivePort()
 	}
 
 	cfg := health.Config{
@@ -327,6 +343,7 @@ func (ms *ManagedService) createDriver() driver.Driver {
 			Name:        ms.spec.Service.Name,
 			Image:       ms.spec.Service.Image,
 			Env:         env,
+			Cmd:         ms.spec.Args,
 			NetworkMode: ms.spec.Service.NetworkMode,
 			Volumes:     ms.spec.Volumes,
 		})
@@ -350,6 +367,11 @@ func (ms *ManagedService) buildEnv() []string {
 	var env []string
 	if ms.spec.Service.Type == "native" {
 		env = os.Environ()
+	}
+
+	// Inject dynamically allocated port as PORT env var
+	if ms.allocatedPort != 0 {
+		env = append(env, fmt.Sprintf("PORT=%d", ms.allocatedPort))
 	}
 
 	for k, v := range ms.spec.Env {

@@ -19,6 +19,7 @@ type ContainerConfig struct {
 	Name        string
 	Image       string
 	Env         []string
+	Cmd         []string          // command/args to pass to the container
 	NetworkMode string            // "host", "bridge", etc. Default: "host"
 	Volumes     map[string]string // host:container mount mappings
 	BufSize     int               // log ring buffer size (lines)
@@ -85,6 +86,7 @@ func (d *ContainerDriver) Start(ctx context.Context) error {
 	config := &container.Config{
 		Image: d.cfg.Image,
 		Env:   d.cfg.Env,
+		Cmd:   d.cfg.Cmd,
 	}
 
 	hostConfig := &container.HostConfig{
