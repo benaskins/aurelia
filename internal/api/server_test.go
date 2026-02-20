@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -222,5 +223,87 @@ service:
 
 	if resp.StatusCode != 200 {
 		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestTCPAuthRequired(t *testing.T) {
+	d := daemon.NewDaemon(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("daemon start: %v", err)
+	}
+	t.Cleanup(func() { d.Stop(5 * time.Second) })
+
+	srv := NewServer(d, nil)
+	tokenPath := filepath.Join(t.TempDir(), "api.token")
+	if err := srv.GenerateToken(tokenPath); err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+
+	// Start TCP listener on a random port
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close() // free the port for ListenTCP
+
+	go srv.ListenTCP(addr)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	// Wait for TCP to be ready
+	for i := 0; i < 20; i++ {
+		if conn, err := net.Dial("tcp", addr); err == nil {
+			conn.Close()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	baseURL := fmt.Sprintf("http://%s", addr)
+
+	// No token — should get 401
+	resp, err := http.Get(baseURL + "/v1/health")
+	if err != nil {
+		t.Fatalf("GET without token: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Errorf("expected 401 without token, got %d", resp.StatusCode)
+	}
+
+	// Wrong token — should get 401
+	req, _ := http.NewRequest("GET", baseURL+"/v1/health", nil)
+	req.Header.Set("Authorization", "Bearer wrong-token")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET with wrong token: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Errorf("expected 401 with wrong token, got %d", resp.StatusCode)
+	}
+
+	// Correct token — should get 200
+	token, _ := os.ReadFile(tokenPath)
+	req, _ = http.NewRequest("GET", baseURL+"/v1/health", nil)
+	req.Header.Set("Authorization", "Bearer "+string(token))
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET with correct token: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200 with correct token, got %d", resp.StatusCode)
+	}
+}
+
+func TestTCPRequiresToken(t *testing.T) {
+	srv := NewServer(daemon.NewDaemon(t.TempDir()), nil)
+	err := srv.ListenTCP("127.0.0.1:0")
+	if err == nil {
+		t.Fatal("expected error when calling ListenTCP without GenerateToken")
 	}
 }

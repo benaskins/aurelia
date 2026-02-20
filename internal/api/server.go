@@ -2,12 +2,15 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/benaskins/aurelia/internal/daemon"
@@ -21,6 +24,7 @@ type Server struct {
 	listener net.Listener
 	server   *http.Server
 	logger   *slog.Logger
+	token    string // bearer token for TCP auth (empty = no auth)
 }
 
 // NewServer creates an API server backed by the given daemon.
@@ -53,6 +57,21 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	return s
 }
 
+// GenerateToken creates a random bearer token and writes it to tokenPath.
+// The token is required for TCP API connections.
+func (s *Server) GenerateToken(tokenPath string) error {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Errorf("generating token: %w", err)
+	}
+	s.token = hex.EncodeToString(b)
+	if err := os.WriteFile(tokenPath, []byte(s.token), 0600); err != nil {
+		return fmt.Errorf("writing token file: %w", err)
+	}
+	s.logger.Info("API token written", "path", tokenPath)
+	return nil
+}
+
 // ListenUnix starts the server on a Unix socket.
 func (s *Server) ListenUnix(path string) error {
 	ln, err := net.Listen("unix", path)
@@ -68,15 +87,40 @@ func (s *Server) ListenUnix(path string) error {
 	return s.server.Serve(ln)
 }
 
-// ListenTCP starts the server on a TCP address.
+// ListenTCP starts the server on a TCP address with bearer token authentication.
+// GenerateToken must be called before ListenTCP.
 func (s *Server) ListenTCP(addr string) error {
+	if s.token == "" {
+		return fmt.Errorf("TCP API requires authentication; call GenerateToken first")
+	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
-	s.listener = ln
 	s.logger.Info("API listening", "addr", addr)
-	return s.server.Serve(ln)
+
+	// Wrap with auth middleware for TCP connections
+	authed := &http.Server{
+		Handler:           s.requireToken(s.server.Handler),
+		ReadTimeout:       s.server.ReadTimeout,
+		WriteTimeout:      s.server.WriteTimeout,
+		ReadHeaderTimeout: s.server.ReadHeaderTimeout,
+		IdleTimeout:       s.server.IdleTimeout,
+		MaxHeaderBytes:    s.server.MaxHeaderBytes,
+	}
+	return authed.Serve(ln)
+}
+
+// requireToken returns middleware that validates the Authorization header.
+func (s *Server) requireToken(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != s.token {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Shutdown gracefully shuts down the API server.

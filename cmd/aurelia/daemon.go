@@ -116,8 +116,12 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		errCh <- srv.ListenUnix(socketPath)
 	}()
 
-	// Optionally start TCP API
+	// Optionally start TCP API with bearer token auth
 	if apiAddr != "" {
+		tokenPath := filepath.Join(filepath.Dir(socketPath), "api.token")
+		if err := srv.GenerateToken(tokenPath); err != nil {
+			return fmt.Errorf("generating API token: %w", err)
+		}
 		go func() {
 			if err := srv.ListenTCP(apiAddr); err != nil {
 				slog.Error("TCP API error", "error", err)
@@ -142,6 +146,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	d.Stop(daemon.DefaultStopTimeout)
 	srv.Shutdown(context.Background())
 	os.Remove(socketPath)
+	if apiAddr != "" {
+		os.Remove(filepath.Join(filepath.Dir(socketPath), "api.token"))
+	}
 
 	slog.Info("aurelia daemon stopped")
 	return nil
