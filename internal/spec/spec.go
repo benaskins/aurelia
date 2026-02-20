@@ -176,6 +176,14 @@ func (s *ServiceSpec) Validate() error {
 		if s.Service.Command != "" {
 			return fmt.Errorf("service.command is not valid for container services")
 		}
+		if nm := s.Service.NetworkMode; nm != "" {
+			switch nm {
+			case "host", "bridge", "none":
+				// ok
+			default:
+				return fmt.Errorf("service.network_mode must be \"host\", \"bridge\", or \"none\", got %q", nm)
+			}
+		}
 	default:
 		return fmt.Errorf("service.type must be \"native\" or \"container\", got %q", s.Service.Type)
 	}

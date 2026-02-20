@@ -250,6 +250,12 @@ func TestValidateServiceSpec(t *testing.T) {
 				Routing: &Routing{Hostname: "bad`host.local"},
 			},
 		},
+		{
+			name: "invalid network_mode on container service",
+			spec: &ServiceSpec{
+				Service: Service{Name: "test", Type: "container", Image: "foo:bar", NetworkMode: "macvlan"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -446,6 +452,48 @@ func TestValidateRequiresMustBeInAfter(t *testing.T) {
 	}
 	if err := spec.Validate(); err == nil {
 		t.Error("expected error when requires has entry not in after")
+	}
+}
+
+func TestValidateContainerNetworkMode(t *testing.T) {
+	t.Parallel()
+
+	validModes := []string{"host", "bridge", "none"}
+	for _, mode := range validModes {
+		mode := mode
+		t.Run("valid_"+mode, func(t *testing.T) {
+			t.Parallel()
+			spec := &ServiceSpec{
+				Service: Service{Name: "test", Type: "container", Image: "foo:bar", NetworkMode: mode},
+			}
+			if err := spec.Validate(); err != nil {
+				t.Errorf("expected network_mode %q to be valid, got: %v", mode, err)
+			}
+		})
+	}
+
+	t.Run("empty network_mode is valid", func(t *testing.T) {
+		t.Parallel()
+		spec := &ServiceSpec{
+			Service: Service{Name: "test", Type: "container", Image: "foo:bar"},
+		}
+		if err := spec.Validate(); err != nil {
+			t.Errorf("expected empty network_mode to be valid, got: %v", err)
+		}
+	})
+
+	invalidModes := []string{"macvlan", "overlay", "custom", "HOST", "Bridge"}
+	for _, mode := range invalidModes {
+		mode := mode
+		t.Run("invalid_"+mode, func(t *testing.T) {
+			t.Parallel()
+			spec := &ServiceSpec{
+				Service: Service{Name: "test", Type: "container", Image: "foo:bar", NetworkMode: mode},
+			}
+			if err := spec.Validate(); err == nil {
+				t.Errorf("expected validation error for network_mode %q", mode)
+			}
+		})
 	}
 }
 
