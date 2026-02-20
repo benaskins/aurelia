@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"html"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,7 +63,7 @@ var installCmd = &cobra.Command{
     <string>%s</string>
 </dict>
 </plist>
-`, launchAgentLabel, binary, logPath, logPath)
+`, launchAgentLabel, html.EscapeString(binary), html.EscapeString(logPath), html.EscapeString(logPath))
 
 		if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
 			return fmt.Errorf("writing plist: %w", err)
