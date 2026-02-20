@@ -240,7 +240,7 @@ Supporting packages: `internal/health` (health probes), `internal/keychain` (Key
 
 **Spec files have the same trust level as shell scripts.** Before loading any spec, you should understand what it will do:
 
-- `service.command` for native services is executed via `sh -c`. Arbitrary shell syntax is supported.
+- `service.command` for native services is split on whitespace and executed directly via `exec.Command`. Shell features such as pipes, redirects, and globbing are not available.
 - `env` and injected secret values are passed directly to the process environment.
 - `volumes` for container services are mounted as specified — including any host path.
 - `args` are passed as additional arguments to the container runtime.
