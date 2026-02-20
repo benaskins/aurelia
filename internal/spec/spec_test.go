@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadValidContainerSpec(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "chat.yaml")
 	data := `
@@ -37,7 +38,7 @@ restart:
   reset_after: 10m
 
 routing:
-  hostname: chat.studio.internal
+  hostname: chat.example.local
   tls: true
 
 env:
@@ -52,8 +53,8 @@ env_file:
   - config/chat.env
 
 volumes:
-  /data: /Users/ben/data
-  /config: /Users/ben/config:ro
+  /data: /tmp/testdata
+  /config: /tmp/testconfig:ro
 
 dependencies:
   after: [postgres, auth]
@@ -122,7 +123,7 @@ dependencies:
 	if len(spec.EnvFile) != 1 || spec.EnvFile[0] != "config/chat.env" {
 		t.Errorf("expected env_file [config/chat.env], got %v", spec.EnvFile)
 	}
-	if spec.Volumes["/data"] != "/Users/ben/data" {
+	if spec.Volumes["/data"] != "/tmp/testdata" {
 		t.Errorf("expected volume /data mapping, got %q", spec.Volumes["/data"])
 	}
 	if len(spec.Dependencies.After) != 2 {
@@ -134,8 +135,8 @@ dependencies:
 	if spec.Routing == nil {
 		t.Fatal("expected routing block")
 	}
-	if spec.Routing.Hostname != "chat.studio.internal" {
-		t.Errorf("expected hostname 'chat.studio.internal', got %q", spec.Routing.Hostname)
+	if spec.Routing.Hostname != "chat.example.local" {
+		t.Errorf("expected hostname 'chat.example.local', got %q", spec.Routing.Hostname)
 	}
 	if !spec.Routing.TLS {
 		t.Error("expected tls true")
@@ -143,6 +144,7 @@ dependencies:
 }
 
 func TestLoadValidNativeSpec(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ollama.yaml")
 	data := `
@@ -191,61 +193,63 @@ env:
 	}
 }
 
-func TestValidateRequiresServiceName(t *testing.T) {
-	spec := &ServiceSpec{
-		Service: Service{Type: "native", Command: "echo"},
-	}
-	if err := spec.Validate(); err == nil {
-		t.Error("expected error for missing service name")
-	}
-}
+func TestValidateServiceSpec(t *testing.T) {
+	t.Parallel()
 
-func TestValidateNativeRequiresCommand(t *testing.T) {
-	spec := &ServiceSpec{
-		Service: Service{Name: "test", Type: "native"},
+	tests := []struct {
+		name string
+		spec *ServiceSpec
+	}{
+		{
+			name: "missing service name",
+			spec: &ServiceSpec{
+				Service: Service{Type: "native", Command: "echo"},
+			},
+		},
+		{
+			name: "native without command",
+			spec: &ServiceSpec{
+				Service: Service{Name: "test", Type: "native"},
+			},
+		},
+		{
+			name: "container without image",
+			spec: &ServiceSpec{
+				Service: Service{Name: "test", Type: "container"},
+			},
+		},
+		{
+			name: "invalid service type",
+			spec: &ServiceSpec{
+				Service: Service{Name: "test", Type: "invalid"},
+			},
+		},
+		{
+			name: "image on native service",
+			spec: &ServiceSpec{
+				Service: Service{Name: "test", Type: "native", Command: "echo", Image: "foo:bar"},
+			},
+		},
+		{
+			name: "command on container service",
+			spec: &ServiceSpec{
+				Service: Service{Name: "test", Type: "container", Image: "foo:bar", Command: "echo"},
+			},
+		},
 	}
-	if err := spec.Validate(); err == nil {
-		t.Error("expected error for native service without command")
-	}
-}
 
-func TestValidateContainerRequiresImage(t *testing.T) {
-	spec := &ServiceSpec{
-		Service: Service{Name: "test", Type: "container"},
-	}
-	if err := spec.Validate(); err == nil {
-		t.Error("expected error for container service without image")
-	}
-}
-
-func TestValidateRejectsInvalidType(t *testing.T) {
-	spec := &ServiceSpec{
-		Service: Service{Name: "test", Type: "invalid"},
-	}
-	if err := spec.Validate(); err == nil {
-		t.Error("expected error for invalid service type")
-	}
-}
-
-func TestValidateRejectsImageOnNative(t *testing.T) {
-	spec := &ServiceSpec{
-		Service: Service{Name: "test", Type: "native", Command: "echo", Image: "foo:bar"},
-	}
-	if err := spec.Validate(); err == nil {
-		t.Error("expected error for image on native service")
-	}
-}
-
-func TestValidateRejectsCommandOnContainer(t *testing.T) {
-	spec := &ServiceSpec{
-		Service: Service{Name: "test", Type: "container", Image: "foo:bar", Command: "echo"},
-	}
-	if err := spec.Validate(); err == nil {
-		t.Error("expected error for command on container service")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if err := tt.spec.Validate(); err == nil {
+				t.Errorf("expected validation error for %s", tt.name)
+			}
+		})
 	}
 }
 
 func TestValidateHealthCheckTypes(t *testing.T) {
+	t.Parallel()
 	base := ServiceSpec{
 		Service: Service{Name: "test", Type: "native", Command: "echo"},
 	}
@@ -273,6 +277,7 @@ func TestValidateHealthCheckTypes(t *testing.T) {
 }
 
 func TestValidateRestartPolicy(t *testing.T) {
+	t.Parallel()
 	base := ServiceSpec{
 		Service: Service{Name: "test", Type: "native", Command: "echo"},
 	}
@@ -291,6 +296,7 @@ func TestValidateRestartPolicy(t *testing.T) {
 }
 
 func TestValidateRoutingRequiresHostname(t *testing.T) {
+	t.Parallel()
 	spec := &ServiceSpec{
 		Service: Service{Name: "test", Type: "native", Command: "echo"},
 		Network: &Network{Port: 8080},
@@ -302,9 +308,10 @@ func TestValidateRoutingRequiresHostname(t *testing.T) {
 }
 
 func TestValidateRoutingRequiresPort(t *testing.T) {
+	t.Parallel()
 	spec := &ServiceSpec{
 		Service: Service{Name: "test", Type: "native", Command: "echo"},
-		Routing: &Routing{Hostname: "test.studio.internal"},
+		Routing: &Routing{Hostname: "test.example.local"},
 	}
 	if err := spec.Validate(); err == nil {
 		t.Error("expected error for routing without port")
@@ -312,10 +319,11 @@ func TestValidateRoutingRequiresPort(t *testing.T) {
 }
 
 func TestValidateRoutingAcceptsHealthPort(t *testing.T) {
+	t.Parallel()
 	spec := &ServiceSpec{
 		Service: Service{Name: "test", Type: "native", Command: "echo"},
 		Health:  &HealthCheck{Type: "http", Path: "/health", Port: 8080, Interval: Duration{10 * time.Second}, Timeout: Duration{2 * time.Second}},
-		Routing: &Routing{Hostname: "test.studio.internal"},
+		Routing: &Routing{Hostname: "test.example.local"},
 	}
 	if err := spec.Validate(); err != nil {
 		t.Errorf("routing with health port should be valid: %v", err)
@@ -323,6 +331,7 @@ func TestValidateRoutingAcceptsHealthPort(t *testing.T) {
 }
 
 func TestValidateRoutingWithTLSOptions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "signal.yaml")
 	data := `
@@ -335,7 +344,7 @@ network:
   port: 8093
 
 routing:
-  hostname: signal-api.studio.internal
+  hostname: signal-api.example.local
   tls: true
   tls_options: mtls
 `
@@ -351,6 +360,7 @@ routing:
 }
 
 func TestValidateRequiresMustBeInAfter(t *testing.T) {
+	t.Parallel()
 	spec := &ServiceSpec{
 		Service: Service{Name: "test", Type: "native", Command: "echo"},
 		Dependencies: &Dependencies{
@@ -363,7 +373,41 @@ func TestValidateRequiresMustBeInAfter(t *testing.T) {
 	}
 }
 
+func TestNeedsDynamicPort(t *testing.T) {
+	t.Parallel()
+	// No network block
+	s := &ServiceSpec{Service: Service{Name: "test", Type: "native", Command: "echo"}}
+	if s.NeedsDynamicPort() {
+		t.Error("expected false when no network block")
+	}
+
+	// Static port
+	s.Network = &Network{Port: 8080}
+	if s.NeedsDynamicPort() {
+		t.Error("expected false for static port")
+	}
+
+	// Dynamic port (port 0)
+	s.Network = &Network{Port: 0}
+	if !s.NeedsDynamicPort() {
+		t.Error("expected true for port 0")
+	}
+}
+
+func TestValidateRoutingAllowsDynamicPort(t *testing.T) {
+	t.Parallel()
+	s := &ServiceSpec{
+		Service: Service{Name: "test", Type: "native", Command: "echo"},
+		Network: &Network{Port: 0},
+		Routing: &Routing{Hostname: "test.example.local"},
+	}
+	if err := s.Validate(); err != nil {
+		t.Errorf("routing with dynamic port (0) should be valid: %v", err)
+	}
+}
+
 func TestLoadDir(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	chat := `
@@ -412,6 +456,7 @@ health:
 }
 
 func TestSecretRefWithRotation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.yaml")
 	data := `

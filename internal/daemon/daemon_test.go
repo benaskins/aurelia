@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -213,7 +215,7 @@ network:
   port: 8090
 
 routing:
-  hostname: chat.studio.internal
+  hostname: chat.example.local
   tls: true
 `)
 
@@ -243,7 +245,7 @@ service:
 	}
 
 	content := string(data)
-	if !containsAll(content, "chat.studio.internal", "8090", "websecure") {
+	if !containsAll(content, "chat.example.local", "8090", "websecure") {
 		t.Errorf("routing config missing expected content:\n%s", content)
 	}
 	// plain service has no routing — should not appear
@@ -254,18 +256,96 @@ service:
 
 func containsAll(s string, substrs ...string) bool {
 	for _, sub := range substrs {
-		found := false
-		for i := 0; i <= len(s)-len(sub); i++ {
-			if s[i:i+len(sub)] == sub {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !strings.Contains(s, sub) {
 			return false
 		}
 	}
 	return true
+}
+
+func TestDaemonDynamicPort(t *testing.T) {
+	dir := t.TempDir()
+	writeSpec(t, dir, "dynamic.yaml", `
+service:
+  name: dynamic-svc
+  type: native
+  command: "sleep 10"
+
+network:
+  port: 0
+`)
+
+	d := NewDaemon(dir, WithPortRange(25000, 25100))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+
+	// Wait for process to start
+	time.Sleep(100 * time.Millisecond)
+
+	state, err := d.ServiceState("dynamic-svc")
+	if err != nil {
+		t.Fatalf("ServiceState: %v", err)
+	}
+
+	if state.Port < 25000 || state.Port > 25100 {
+		t.Errorf("expected port in range 25000-25100, got %d", state.Port)
+	}
+	if state.State != "running" {
+		t.Errorf("expected running, got %v", state.State)
+	}
+}
+
+func TestDaemonDynamicPortRouting(t *testing.T) {
+	dir := t.TempDir()
+	routingPath := filepath.Join(t.TempDir(), "traefik", "aurelia.yaml")
+
+	writeSpec(t, dir, "dynamic-routed.yaml", `
+service:
+  name: dynamic-routed
+  type: native
+  command: "sleep 30"
+
+network:
+  port: 0
+
+routing:
+  hostname: dynamic.example.local
+  tls: true
+`)
+
+	d := NewDaemon(dir, WithRouting(routingPath), WithPortRange(26000, 26100))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+
+	// Wait for onStarted callback to fire and routing to generate
+	time.Sleep(200 * time.Millisecond)
+
+	state, err := d.ServiceState("dynamic-routed")
+	if err != nil {
+		t.Fatalf("ServiceState: %v", err)
+	}
+
+	// Verify routing config was generated with the allocated port
+	data, err := os.ReadFile(routingPath)
+	if err != nil {
+		t.Fatalf("routing config not written: %v", err)
+	}
+
+	content := string(data)
+	portStr := fmt.Sprintf("%d", state.Port)
+	if !containsAll(content, "dynamic.example.local", portStr) {
+		t.Errorf("routing config missing hostname or allocated port %d:\n%s", state.Port, content)
+	}
 }
 
 func TestDaemonEmptyDir(t *testing.T) {

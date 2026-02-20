@@ -31,7 +31,7 @@ func TestGenerateSingleHTTPService(t *testing.T) {
 	g := NewTraefikGenerator(path)
 
 	routes := []ServiceRoute{
-		{Name: "grafana", Hostname: "grafana.studio.internal", Port: 3000, TLS: false},
+		{Name: "grafana", Hostname: "grafana.example.local", Port: 3000, TLS: false},
 	}
 
 	if err := g.Generate(routes); err != nil {
@@ -44,7 +44,7 @@ func TestGenerateSingleHTTPService(t *testing.T) {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, "Host(`grafana.studio.internal`)") {
+	if !strings.Contains(content, "Host(`grafana.example.local`)") {
 		t.Error("expected hostname rule")
 	}
 	if !strings.Contains(content, "http://127.0.0.1:3000") {
@@ -63,7 +63,7 @@ func TestGenerateTLSService(t *testing.T) {
 	g := NewTraefikGenerator(path)
 
 	routes := []ServiceRoute{
-		{Name: "chat", Hostname: "chat.studio.internal", Port: 8090, TLS: true},
+		{Name: "chat", Hostname: "chat.example.local", Port: 8090, TLS: true},
 	}
 
 	if err := g.Generate(routes); err != nil {
@@ -79,7 +79,7 @@ func TestGenerateTLSService(t *testing.T) {
 	if !strings.Contains(content, "websecure") {
 		t.Error("expected websecure entrypoint for TLS service")
 	}
-	if !strings.Contains(content, "Host(`chat.studio.internal`)") {
+	if !strings.Contains(content, "Host(`chat.example.local`)") {
 		t.Error("expected hostname rule")
 	}
 	if !strings.Contains(content, "tls:") {
@@ -92,7 +92,7 @@ func TestGenerateMTLSService(t *testing.T) {
 	g := NewTraefikGenerator(path)
 
 	routes := []ServiceRoute{
-		{Name: "signal-api", Hostname: "signal-api.studio.internal", Port: 8093, TLS: true, TLSOptions: "mtls"},
+		{Name: "signal-api", Hostname: "signal-api.example.local", Port: 8093, TLS: true, TLSOptions: "mtls"},
 	}
 
 	if err := g.Generate(routes); err != nil {
@@ -115,10 +115,10 @@ func TestGenerateMultipleServices(t *testing.T) {
 	g := NewTraefikGenerator(path)
 
 	routes := []ServiceRoute{
-		{Name: "chat", Hostname: "chat.studio.internal", Port: 8090, TLS: true},
-		{Name: "auth", Hostname: "auth.studio.internal", Port: 8092, TLS: true},
-		{Name: "grafana", Hostname: "grafana.studio.internal", Port: 3000, TLS: false},
-		{Name: "signal-api", Hostname: "signal-api.studio.internal", Port: 8093, TLS: true, TLSOptions: "mtls"},
+		{Name: "chat", Hostname: "chat.example.local", Port: 8090, TLS: true},
+		{Name: "auth", Hostname: "auth.example.local", Port: 8092, TLS: true},
+		{Name: "grafana", Hostname: "grafana.example.local", Port: 3000, TLS: false},
+		{Name: "signal-api", Hostname: "signal-api.example.local", Port: 8093, TLS: true, TLSOptions: "mtls"},
 	}
 
 	if err := g.Generate(routes); err != nil {
@@ -160,22 +160,22 @@ func TestGenerateOverwritesPrevious(t *testing.T) {
 
 	// First generation with two services
 	g.Generate([]ServiceRoute{
-		{Name: "chat", Hostname: "chat.studio.internal", Port: 8090, TLS: true},
-		{Name: "auth", Hostname: "auth.studio.internal", Port: 8092, TLS: true},
+		{Name: "chat", Hostname: "chat.example.local", Port: 8090, TLS: true},
+		{Name: "auth", Hostname: "auth.example.local", Port: 8092, TLS: true},
 	})
 
 	// Second generation with only one — auth is gone
 	g.Generate([]ServiceRoute{
-		{Name: "chat", Hostname: "chat.studio.internal", Port: 8090, TLS: true},
+		{Name: "chat", Hostname: "chat.example.local", Port: 8090, TLS: true},
 	})
 
 	data, _ := os.ReadFile(path)
 	content := string(data)
 
-	if !strings.Contains(content, "chat.studio.internal") {
+	if !strings.Contains(content, "chat.example.local") {
 		t.Error("expected chat in output")
 	}
-	if strings.Contains(content, "auth.studio.internal") {
+	if strings.Contains(content, "auth.example.local") {
 		t.Error("auth should have been removed on regeneration")
 	}
 }
