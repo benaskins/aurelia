@@ -49,9 +49,6 @@ secrets:
   DATABASE_URL:
     keychain: aurelia/chat/database-url
 
-env_file:
-  - config/chat.env
-
 volumes:
   /data: /tmp/testdata
   /config: /tmp/testconfig:ro
@@ -119,9 +116,6 @@ dependencies:
 	}
 	if spec.Secrets["DATABASE_URL"].Keychain != "aurelia/chat/database-url" {
 		t.Errorf("expected secret keychain ref, got %q", spec.Secrets["DATABASE_URL"].Keychain)
-	}
-	if len(spec.EnvFile) != 1 || spec.EnvFile[0] != "config/chat.env" {
-		t.Errorf("expected env_file [config/chat.env], got %v", spec.EnvFile)
 	}
 	if spec.Volumes["/data"] != "/tmp/testdata" {
 		t.Errorf("expected volume /data mapping, got %q", spec.Volumes["/data"])

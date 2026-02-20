@@ -29,6 +29,14 @@ cd aurelia
 go build -o aurelia ./cmd/aurelia/
 ```
 
+To build with the version string injected (recommended), use:
+
+```bash
+make build
+```
+
+`make build` passes the version via ldflags so that `aurelia --version` reports the correct release.
+
 To start the daemon automatically on login, install it as a LaunchAgent:
 
 ```bash
@@ -106,6 +114,7 @@ aurelia reload          # re-read specs and reconcile (add new, remove deleted)
 | `aurelia secret list` | List secrets with age and rotation status |
 | `aurelia secret delete <key>` | Remove a secret |
 | `aurelia secret rotate <key> -c <cmd>` | Rotate a secret using a shell command |
+| `aurelia --version` | Show version information |
 
 ### Daemon flags
 
@@ -132,7 +141,7 @@ service:
 
   # container only (alternative to command/working_dir)
   # image: myimage:latest
-  # network_mode: bridge    # default "bridge"
+  # network_mode: host      # default "host"
 
 # Static or dynamic port binding
 network:
@@ -162,11 +171,6 @@ restart:
 env:
   LOG_LEVEL: info
   APP_ENV: development
-
-# Load environment from files (optional)
-env_file:
-  - .env
-  - .env.local
 
 # Secrets from macOS Keychain, injected as env vars (optional)
 secrets:
@@ -200,10 +204,10 @@ dependencies:
 |---|---|---|
 | `name` | string | Unique service identifier (required) |
 | `type` | string | `native` or `container` (required) |
-| `command` | string | Shell command to run (native only, required for native) |
+| `command` | string | Command to run, split on whitespace and executed directly — no shell (native only, required for native) |
 | `working_dir` | string | Working directory for the process (native only) |
 | `image` | string | Container image (container only, required for container) |
-| `network_mode` | string | Docker network mode, default `bridge` (container only) |
+| `network_mode` | string | Docker network mode, default `host` (container only) |
 
 **`dependencies`**
 

@@ -24,7 +24,6 @@ type ServiceSpec struct {
 	Restart      *RestartPolicy       `yaml:"restart,omitempty"`
 	Env          map[string]string    `yaml:"env,omitempty"`
 	Secrets      map[string]SecretRef `yaml:"secrets,omitempty"`
-	EnvFile      []string             `yaml:"env_file,omitempty"`
 	Volumes      map[string]string    `yaml:"volumes,omitempty"`
 	Dependencies *Dependencies        `yaml:"dependencies,omitempty"`
 	Args         []string             `yaml:"args,omitempty"`
