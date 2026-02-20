@@ -32,10 +32,10 @@ go build -o aurelia ./cmd/aurelia/
 To build with the version string injected (recommended), use:
 
 ```bash
-make build
+just build
 ```
 
-`make build` passes the version via ldflags so that `aurelia --version` reports the correct release.
+`just build` passes the version via ldflags so that `aurelia --version` reports the correct release.
 
 To start the daemon automatically on login, install it as a LaunchAgent:
 
