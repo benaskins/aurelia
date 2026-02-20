@@ -50,16 +50,14 @@ func apiPost(path string) (map[string]any, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+	}
+
 	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decoding response: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		if msg, ok := result["error"]; ok {
-			return nil, fmt.Errorf("%v", msg)
-		}
-		return nil, fmt.Errorf("API error (%d)", resp.StatusCode)
 	}
 
 	return result, nil
@@ -193,7 +191,9 @@ var reloadCmd = &cobra.Command{
 			return fmt.Errorf("connecting to daemon: %w", err)
 		}
 		defer resp.Body.Close()
-		json.NewDecoder(resp.Body).Decode(&result)
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return fmt.Errorf("decoding response: %w", err)
+		}
 
 		if added, ok := result["added"]; ok {
 			fmt.Printf("Added: %v\n", added)

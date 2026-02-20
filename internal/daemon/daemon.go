@@ -182,6 +182,9 @@ func (d *Daemon) Stop(timeout time.Duration) {
 				}
 			}
 			d.logger.Info("all services stopped")
+			if err := d.state.save(map[string]ServiceRecord{}); err != nil {
+				d.logger.Warn("failed to clear state on shutdown", "error", err)
+			}
 			return
 		}
 		d.logger.Warn("stop order failed, falling back to parallel stop", "error", err)
@@ -208,6 +211,9 @@ func (d *Daemon) Stop(timeout time.Duration) {
 	wg.Wait()
 
 	d.logger.Info("all services stopped")
+	if err := d.state.save(map[string]ServiceRecord{}); err != nil {
+		d.logger.Warn("failed to clear state on shutdown", "error", err)
+	}
 }
 
 // StartService starts a single service by name.
@@ -333,8 +339,8 @@ func (d *Daemon) Reload(ctx context.Context) (*ReloadResult, error) {
 		}
 	}
 
-	// Regenerate routing after reconciliation (lock is held, call unlocked version)
-	go d.regenerateRouting()
+	// Regenerate routing after reconciliation (write lock is held, use locked variant)
+	d.regenerateRoutingLocked()
 
 	return result, nil
 }
@@ -394,12 +400,25 @@ func (d *Daemon) startServiceLocked(ctx context.Context, s *spec.ServiceSpec) er
 
 // regenerateRouting collects routing info from all running services and
 // writes a Traefik dynamic config file. No-op if routing is not configured.
+// It acquires RLock internally and is safe to call without any lock held.
 func (d *Daemon) regenerateRouting() {
 	if d.routing == nil {
 		return
 	}
 
 	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	d.regenerateRoutingLocked()
+}
+
+// regenerateRoutingLocked is the lock-free variant of regenerateRouting.
+// It must only be called by a goroutine that already holds d.mu (read or write).
+func (d *Daemon) regenerateRoutingLocked() {
+	if d.routing == nil {
+		return
+	}
+
 	var routes []routing.ServiceRoute
 	for _, ms := range d.services {
 		if ms.spec.Routing == nil {
@@ -427,7 +446,6 @@ func (d *Daemon) regenerateRouting() {
 			TLSOptions: ms.spec.Routing.TLSOptions,
 		})
 	}
-	d.mu.RUnlock()
 
 	if err := d.routing.Generate(routes); err != nil {
 		d.logger.Error("failed to regenerate routing config", "error", err)

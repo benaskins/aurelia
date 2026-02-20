@@ -29,6 +29,7 @@ type ContainerDriver struct {
 	cfg ContainerConfig
 
 	mu          sync.Mutex
+	closeOnce   sync.Once
 	client      *dockerclient.Client
 	containerID string
 	state       State
@@ -163,15 +164,22 @@ func (d *ContainerDriver) Stop(ctx context.Context, timeout time.Duration) error
 	// Remove the container
 	d.client.ContainerRemove(context.Background(), containerID, container.RemoveOptions{})
 
-	// Close the Docker client to release resources
-	d.client.Close()
+	// Close the Docker client to release resources (idempotent via closeOnce)
+	d.closeClient()
 
 	return nil
 }
 
 // Close releases the Docker client connection.
 func (d *ContainerDriver) Close() error {
-	return d.client.Close()
+	d.closeClient()
+	return nil
+}
+
+func (d *ContainerDriver) closeClient() {
+	d.closeOnce.Do(func() {
+		d.client.Close()
+	})
 }
 
 func (d *ContainerDriver) Info() ProcessInfo {
@@ -247,7 +255,8 @@ func (d *ContainerDriver) waitForExit() {
 	select {
 	case err := <-errCh:
 		d.mu.Lock()
-		if d.state == StateStopping {
+		wasStopping := d.state == StateStopping
+		if wasStopping {
 			d.state = StateStopped
 		} else {
 			d.state = StateFailed
@@ -257,11 +266,17 @@ func (d *ContainerDriver) waitForExit() {
 		}
 		close(d.done)
 		d.mu.Unlock()
+		// On natural exit (not triggered by Stop), close the client here since
+		// Stop() will never be called to do it.
+		if !wasStopping {
+			d.closeClient()
+		}
 
 	case status := <-statusCh:
 		d.mu.Lock()
 		d.exitCode = int(status.StatusCode)
-		if d.state == StateStopping {
+		wasStopping := d.state == StateStopping
+		if wasStopping {
 			d.state = StateStopped
 		} else if status.StatusCode != 0 {
 			d.state = StateFailed
@@ -273,6 +288,11 @@ func (d *ContainerDriver) waitForExit() {
 		}
 		close(d.done)
 		d.mu.Unlock()
+		// On natural exit (not triggered by Stop), close the client here since
+		// Stop() will never be called to do it.
+		if !wasStopping {
+			d.closeClient()
+		}
 	}
 }
 
