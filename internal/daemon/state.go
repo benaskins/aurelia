@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -19,6 +21,9 @@ type ServiceRecord struct {
 	PID         int    `json:"pid,omitempty"`
 	Type        string `json:"type"`
 	ContainerID string `json:"container_id,omitempty"`
+	Port        int    `json:"port,omitempty"`
+	StartedAt   int64  `json:"started_at,omitempty"` // Unix timestamp
+	Command     string `json:"command,omitempty"`     // process command for PID reuse detection
 }
 
 func newStateFile(dir string) *stateFile {
@@ -33,7 +38,7 @@ func (sf *stateFile) load() (map[string]ServiceRecord, error) {
 
 	data, err := os.ReadFile(sf.path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("reading state file: %w", err)
@@ -50,7 +55,7 @@ func (sf *stateFile) save(records map[string]ServiceRecord) error {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 
-	if err := os.MkdirAll(filepath.Dir(sf.path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(sf.path), 0700); err != nil {
 		return err
 	}
 
@@ -59,7 +64,7 @@ func (sf *stateFile) save(records map[string]ServiceRecord) error {
 		return err
 	}
 
-	return os.WriteFile(sf.path, data, 0644)
+	return os.WriteFile(sf.path, data, 0600)
 }
 
 func (sf *stateFile) set(name string, rec ServiceRecord) error {
@@ -91,7 +96,7 @@ func (sf *stateFile) remove(name string) error {
 func (sf *stateFile) loadUnsafe() (map[string]ServiceRecord, error) {
 	data, err := os.ReadFile(sf.path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err
@@ -105,12 +110,12 @@ func (sf *stateFile) loadUnsafe() (map[string]ServiceRecord, error) {
 }
 
 func (sf *stateFile) saveUnsafe(records map[string]ServiceRecord) error {
-	if err := os.MkdirAll(filepath.Dir(sf.path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(sf.path), 0700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(sf.path, data, 0644)
+	return os.WriteFile(sf.path, data, 0600)
 }

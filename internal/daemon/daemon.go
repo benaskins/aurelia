@@ -9,8 +9,20 @@ import (
 
 	"github.com/benaskins/aurelia/internal/driver"
 	"github.com/benaskins/aurelia/internal/keychain"
+	"github.com/benaskins/aurelia/internal/port"
 	"github.com/benaskins/aurelia/internal/routing"
 	"github.com/benaskins/aurelia/internal/spec"
+)
+
+const (
+	// DefaultStopTimeout is the default graceful shutdown timeout for services.
+	DefaultStopTimeout = 30 * time.Second
+
+	// defaultPortMin is the lower bound of the dynamic port allocation range.
+	defaultPortMin = 20000
+
+	// defaultPortMax is the upper bound of the dynamic port allocation range.
+	defaultPortMax = 32000
 )
 
 // Daemon is the top-level process supervisor.
@@ -19,6 +31,7 @@ type Daemon struct {
 	stateDir string
 	secrets  keychain.Store
 	routing  *routing.TraefikGenerator
+	ports    *port.Allocator
 	services map[string]*ManagedService
 	deps     *depGraph
 	state    *stateFile
@@ -28,10 +41,11 @@ type Daemon struct {
 
 // NewDaemon creates a new daemon that manages services from the given spec directory.
 // The secrets store is optional — if nil, secret injection is disabled.
-func NewDaemon(specDir string, opts ...DaemonOption) *Daemon {
+func NewDaemon(specDir string, opts ...Option) *Daemon {
 	d := &Daemon{
 		specDir:  specDir,
 		stateDir: specDir, // default: same as spec dir
+		ports:    port.NewAllocator(defaultPortMin, defaultPortMax),
 		services: make(map[string]*ManagedService),
 		logger:   slog.With("component", "daemon"),
 	}
@@ -42,25 +56,32 @@ func NewDaemon(specDir string, opts ...DaemonOption) *Daemon {
 	return d
 }
 
-// DaemonOption configures the daemon.
-type DaemonOption func(*Daemon)
+// Option configures the daemon.
+type Option func(*Daemon)
 
 // WithSecrets sets the secret store for the daemon.
-func WithSecrets(s keychain.Store) DaemonOption {
+func WithSecrets(s keychain.Store) Option {
 	return func(d *Daemon) {
 		d.secrets = s
 	}
 }
 
 // WithStateDir sets the directory for the daemon state file.
-func WithStateDir(dir string) DaemonOption {
+func WithStateDir(dir string) Option {
 	return func(d *Daemon) {
 		d.stateDir = dir
 	}
 }
 
+// WithPortRange sets the dynamic port allocation range.
+func WithPortRange(min, max int) Option {
+	return func(d *Daemon) {
+		d.ports = port.NewAllocator(min, max)
+	}
+}
+
 // WithRouting enables Traefik config generation at the given output path.
-func WithRouting(outputPath string) DaemonOption {
+func WithRouting(outputPath string) Option {
 	return func(d *Daemon) {
 		d.routing = routing.NewTraefikGenerator(outputPath)
 	}
@@ -88,23 +109,42 @@ func (d *Daemon) Start(ctx context.Context) error {
 	d.logger.Info("start order resolved", "order", order)
 
 	// Load previous state for crash recovery
-	prevState, _ := d.state.load()
+	prevState, err := d.state.load()
+	if err != nil {
+		d.logger.Warn("failed to load previous state", "error", err)
+	}
+
+	// Restore port allocations from previous state
+	for name, rec := range prevState {
+		if rec.Port > 0 {
+			if err := d.ports.Reserve(name, rec.Port); err != nil {
+				d.logger.Warn("failed to reserve previous port", "service", name, "port", rec.Port, "error", err)
+			}
+		}
+	}
 
 	for _, name := range order {
 		s := g.specs[name]
 
 		// Try to adopt a previously-running process
 		if rec, ok := prevState[name]; ok && rec.Type == "native" && rec.PID > 0 {
-			adopted, err := driver.NewAdopted(rec.PID)
-			if err == nil {
-				d.logger.Info("recovering running process", "service", name, "pid", rec.PID)
-				if err := d.adoptService(ctx, s, adopted); err != nil {
-					d.logger.Error("failed to adopt service", "service", name, "error", err)
-				} else {
-					continue
-				}
+			// Verify the PID still belongs to the expected process (guard against PID reuse)
+			if !driver.VerifyProcess(rec.PID, rec.Command) {
+				d.logger.Warn("PID reuse detected, skipping adoption",
+					"service", name, "pid", rec.PID,
+					"expected_command", rec.Command)
 			} else {
-				d.logger.Info("previous process not running", "service", name, "pid", rec.PID)
+				adopted, err := driver.NewAdopted(rec.PID)
+				if err == nil {
+					d.logger.Info("recovering running process", "service", name, "pid", rec.PID)
+					if err := d.adoptService(ctx, s, adopted); err != nil {
+						d.logger.Error("failed to adopt service", "service", name, "error", err)
+					} else {
+						continue
+					}
+				} else {
+					d.logger.Info("previous process not running", "service", name, "pid", rec.PID)
+				}
 			}
 		}
 
@@ -274,7 +314,8 @@ func (d *Daemon) Reload(ctx context.Context) (*ReloadResult, error) {
 	for name, ms := range d.services {
 		if _, exists := newSpecs[name]; !exists {
 			d.logger.Info("removing service", "service", name)
-			ms.Stop(30 * time.Second)
+			ms.Stop(DefaultStopTimeout)
+			d.ports.Release(name)
 			delete(d.services, name)
 			result.Removed = append(result.Removed, name)
 		}
@@ -317,8 +358,25 @@ func (d *Daemon) startServiceLocked(ctx context.Context, s *spec.ServiceSpec) er
 	}
 
 	name := s.Service.Name
+
+	// Allocate a dynamic port if the spec requests one
+	if s.NeedsDynamicPort() {
+		p, err := d.ports.Allocate(name)
+		if err != nil {
+			return fmt.Errorf("allocating port for %s: %w", name, err)
+		}
+		ms.allocatedPort = p
+		d.logger.Info("allocated dynamic port", "service", name, "port", p)
+	}
+
 	ms.onStarted = func(pid int) {
-		rec := ServiceRecord{Type: s.Service.Type, PID: pid}
+		rec := ServiceRecord{
+			Type:      s.Service.Type,
+			PID:       pid,
+			Port:      ms.allocatedPort,
+			StartedAt: time.Now().Unix(),
+			Command:   s.Service.Command,
+		}
 		if err := d.state.set(name, rec); err != nil {
 			d.logger.Warn("failed to save service state", "service", name, "error", err)
 		}
@@ -353,10 +411,7 @@ func (d *Daemon) regenerateRouting() {
 			continue
 		}
 
-		port := 0
-		if ms.spec.Network != nil {
-			port = ms.spec.Network.Port
-		}
+		port := ms.EffectivePort()
 		if port == 0 && ms.spec.Health != nil {
 			port = ms.spec.Health.Port
 		}
@@ -389,8 +444,22 @@ func (d *Daemon) adoptService(ctx context.Context, s *spec.ServiceSpec, drv driv
 
 	name := s.Service.Name
 	ms.adoptedDrv = drv
+
+	// Restore dynamic port from allocator (reserved during state load)
+	if s.NeedsDynamicPort() {
+		if p := d.ports.Port(name); p != 0 {
+			ms.allocatedPort = p
+		}
+	}
+
 	ms.onStarted = func(pid int) {
-		rec := ServiceRecord{Type: s.Service.Type, PID: pid}
+		rec := ServiceRecord{
+			Type:      s.Service.Type,
+			PID:       pid,
+			Port:      ms.allocatedPort,
+			StartedAt: time.Now().Unix(),
+			Command:   s.Service.Command,
+		}
 		if err := d.state.set(name, rec); err != nil {
 			d.logger.Warn("failed to save service state", "service", name, "error", err)
 		}
@@ -408,4 +477,3 @@ func (d *Daemon) adoptService(ctx context.Context, s *spec.ServiceSpec, drv driv
 	d.logger.Info("adopted service", "service", s.Service.Name, "pid", drv.Info().PID)
 	return nil
 }
-

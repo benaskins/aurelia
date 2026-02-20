@@ -14,17 +14,14 @@ import (
 	"golang.org/x/term"
 )
 
-func aureliaDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "/tmp/.aurelia"
-	}
-	return filepath.Join(home, ".aurelia")
-}
-
 func newAuditedStore() (*keychain.AuditedStore, error) {
-	dir := aureliaDir()
-	os.MkdirAll(dir, 0755)
+	dir, err := aureliaHome()
+	if err != nil {
+		return nil, fmt.Errorf("finding aurelia home: %w", err)
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, fmt.Errorf("creating directory: %w", err)
+	}
 
 	auditLog, err := audit.NewLogger(filepath.Join(dir, "audit.log"))
 	if err != nil {
@@ -36,7 +33,7 @@ func newAuditedStore() (*keychain.AuditedStore, error) {
 		return nil, err
 	}
 
-	inner := keychain.NewKeychainStore()
+	inner := keychain.NewSystemStore()
 	return keychain.NewAuditedStore(inner, auditLog, meta, "cli"), nil
 }
 

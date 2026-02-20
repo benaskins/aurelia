@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/benaskins/aurelia/internal/api"
+	"github.com/benaskins/aurelia/internal/config"
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/gpu"
 	"github.com/benaskins/aurelia/internal/keychain"
@@ -40,8 +41,30 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	specDir := defaultSpecDir()
 
 	// Ensure spec directory exists
-	if err := os.MkdirAll(specDir, 0755); err != nil {
+	if err := os.MkdirAll(specDir, 0700); err != nil {
 		return fmt.Errorf("creating spec dir: %w", err)
+	}
+
+	// Load config file (missing file is not an error)
+	cfgPath := config.DefaultPath()
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return fmt.Errorf("loading config %s: %w", cfgPath, err)
+	}
+
+	// CLI flags override config file values
+	if routingOutput == "" && cfg.RoutingOutput != "" {
+		routingOutput = cfg.RoutingOutput
+		slog.Info("routing-output from config file", "path", routingOutput)
+	} else if routingOutput != "" {
+		slog.Info("routing-output from CLI flag", "path", routingOutput)
+	}
+
+	if apiAddr == "" && cfg.APIAddr != "" {
+		apiAddr = cfg.APIAddr
+		slog.Info("api-addr from config file", "addr", apiAddr)
+	} else if apiAddr != "" {
+		slog.Info("api-addr from CLI flag", "addr", apiAddr)
 	}
 
 	slog.Info("aurelia daemon starting", "spec_dir", specDir)
@@ -54,9 +77,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
 	// Create and start daemon with Keychain secret store
-	secrets := keychain.NewKeychainStore()
+	secrets := keychain.NewSystemStore()
 	stateDir := filepath.Join(filepath.Dir(specDir))
-	opts := []daemon.DaemonOption{daemon.WithSecrets(secrets), daemon.WithStateDir(stateDir)}
+	opts := []daemon.Option{daemon.WithSecrets(secrets), daemon.WithStateDir(stateDir)}
 	if routingOutput != "" {
 		opts = append(opts, daemon.WithRouting(routingOutput))
 		slog.Info("routing enabled", "output", routingOutput)
@@ -70,7 +93,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	socketPath := defaultSocketPath()
 	// Remove stale socket
 	os.Remove(socketPath)
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {
 		return fmt.Errorf("creating socket dir: %w", err)
 	}
 
@@ -78,7 +101,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	gpuObs := gpu.NewObserver(5 * time.Second)
 	gpuObs.Start(ctx)
 
-	srv := api.NewServer(d, gpuObs, ctx)
+	srv := api.NewServer(d, gpuObs)
 
 	// Start API in background
 	errCh := make(chan error, 1)
@@ -109,7 +132,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	// Graceful shutdown
 	cancel()
-	d.Stop(30 * time.Second)
+	d.Stop(daemon.DefaultStopTimeout)
 	srv.Shutdown(context.Background())
 	os.Remove(socketPath)
 
@@ -118,9 +141,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 }
 
 func defaultSocketPath() string {
-	home, err := os.UserHomeDir()
+	dir, err := aureliaHome()
 	if err != nil {
 		return "/tmp/aurelia.sock"
 	}
-	return filepath.Join(home, ".aurelia", "aurelia.sock")
+	return filepath.Join(dir, "aurelia.sock")
 }

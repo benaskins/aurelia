@@ -3,10 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
-	"time"
+	"os"
 
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/gpu"
@@ -19,17 +20,15 @@ type Server struct {
 	listener net.Listener
 	server   *http.Server
 	logger   *slog.Logger
-	ctx      context.Context
 }
 
 // NewServer creates an API server backed by the given daemon.
 // The GPU observer is optional — if nil, /v1/gpu returns empty.
-func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer, ctx context.Context) *Server {
+func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	s := &Server{
 		daemon: d,
 		gpu:    gpuObs,
 		logger: slog.With("component", "api"),
-		ctx:    ctx,
 	}
 
 	mux := http.NewServeMux()
@@ -51,6 +50,10 @@ func (s *Server) ListenUnix(path string) error {
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		return err
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		ln.Close()
+		return fmt.Errorf("setting socket permissions: %w", err)
 	}
 	s.listener = ln
 	s.logger.Info("API listening", "socket", path)
@@ -90,7 +93,7 @@ func (s *Server) getService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) startService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if err := s.daemon.StartService(s.ctx, name); err != nil {
+	if err := s.daemon.StartService(r.Context(), name); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -99,7 +102,7 @@ func (s *Server) startService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) stopService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if err := s.daemon.StopService(name, 30*time.Second); err != nil {
+	if err := s.daemon.StopService(name, daemon.DefaultStopTimeout); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -108,7 +111,7 @@ func (s *Server) stopService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if err := s.daemon.RestartService(s.ctx, name, 30*time.Second); err != nil {
+	if err := s.daemon.RestartService(r.Context(), name, daemon.DefaultStopTimeout); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -116,7 +119,7 @@ func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
-	result, err := s.daemon.Reload(s.ctx)
+	result, err := s.daemon.Reload(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -136,7 +139,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)

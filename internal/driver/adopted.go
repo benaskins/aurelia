@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -159,4 +162,37 @@ func (d *AdoptedDriver) Wait() (int, error) {
 
 func (d *AdoptedDriver) Stdout() io.Reader {
 	return d.buf.Reader()
+}
+
+// VerifyProcess checks whether the process at the given PID matches the expected
+// command name. This guards against PID reuse: if the OS recycled the PID for a
+// different process, the command won't match and adoption should be skipped.
+// Returns true if the process matches or if expectedCommand is empty (best effort).
+func VerifyProcess(pid int, expectedCommand string) bool {
+	if expectedCommand == "" {
+		return true // no command recorded, best effort
+	}
+
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+	if err != nil {
+		return false // process not found or ps failed
+	}
+
+	actual := strings.TrimSpace(string(out))
+	if actual == "" {
+		return false
+	}
+
+	// Compare base names — the spec command may be a full path
+	expectedBase := expectedCommand
+	if idx := strings.LastIndex(expectedCommand, "/"); idx >= 0 {
+		expectedBase = expectedCommand[idx+1:]
+	}
+
+	actualBase := actual
+	if idx := strings.LastIndex(actual, "/"); idx >= 0 {
+		actualBase = actual[idx+1:]
+	}
+
+	return actualBase == expectedBase
 }
