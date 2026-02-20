@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 )
+
+var sanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
 
 // TraefikGenerator writes Traefik dynamic config from service state.
 type TraefikGenerator struct {
@@ -51,7 +53,11 @@ func (g *TraefikGenerator) Generate(routes []ServiceRoute) error {
 		return fmt.Errorf("creating output dir: %w", err)
 	}
 
-	return os.WriteFile(g.outputPath, out, 0600)
+	tmpPath := g.outputPath + ".tmp"
+	if err := os.WriteFile(tmpPath, out, 0600); err != nil {
+		return fmt.Errorf("writing traefik config: %w", err)
+	}
+	return os.Rename(tmpPath, g.outputPath)
 }
 
 // OutputPath returns the path where config is written.
@@ -142,5 +148,5 @@ func (g *TraefikGenerator) buildConfig(routes []ServiceRoute) traefikConfig {
 // sanitizeName converts a service name to a Traefik-safe identifier.
 // Traefik names must be alphanumeric + hyphens.
 func sanitizeName(name string) string {
-	return strings.ReplaceAll(name, "_", "-")
+	return sanitizeRe.ReplaceAllString(name, "-")
 }

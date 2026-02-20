@@ -4,9 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"gopkg.in/yaml.v3"
+)
+
+var (
+	serviceNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+	hostnameRe    = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$`)
 )
 
 // ServiceSpec is the top-level structure for a service definition.
@@ -152,6 +158,9 @@ func (s *ServiceSpec) Validate() error {
 	if s.Service.Name == "" {
 		return fmt.Errorf("service.name is required")
 	}
+	if !serviceNameRe.MatchString(s.Service.Name) {
+		return fmt.Errorf("service.name %q is invalid: must match ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$", s.Service.Name)
+	}
 
 	switch s.Service.Type {
 	case "native":
@@ -217,6 +226,9 @@ func (s *ServiceSpec) Validate() error {
 	if r := s.Routing; r != nil {
 		if r.Hostname == "" {
 			return fmt.Errorf("routing.hostname is required")
+		}
+		if !hostnameRe.MatchString(r.Hostname) {
+			return fmt.Errorf("routing.hostname %q is invalid: must be a valid hostname", r.Hostname)
 		}
 		// Routing requires a port source: static network.port, dynamic (port 0
 		// with network block — resolved at runtime), or health.port.

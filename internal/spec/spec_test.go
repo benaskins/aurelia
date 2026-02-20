@@ -236,6 +236,26 @@ func TestValidateServiceSpec(t *testing.T) {
 				Service: Service{Name: "test", Type: "container", Image: "foo:bar", Command: "echo"},
 			},
 		},
+		{
+			name: "invalid service name with slashes",
+			spec: &ServiceSpec{
+				Service: Service{Name: "my/service", Type: "native", Command: "echo"},
+			},
+		},
+		{
+			name: "invalid service name with dotdot",
+			spec: &ServiceSpec{
+				Service: Service{Name: "..badname", Type: "native", Command: "echo"},
+			},
+		},
+		{
+			name: "invalid hostname with backtick",
+			spec: &ServiceSpec{
+				Service: Service{Name: "test", Type: "native", Command: "echo"},
+				Network: &Network{Port: 8080},
+				Routing: &Routing{Hostname: "bad`host.local"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -246,6 +266,68 @@ func TestValidateServiceSpec(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateServiceName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid service name", func(t *testing.T) {
+		t.Parallel()
+		spec := &ServiceSpec{
+			Service: Service{Name: "my-service_1.0", Type: "native", Command: "echo"},
+		}
+		if err := spec.Validate(); err != nil {
+			t.Errorf("expected valid service name to pass, got: %v", err)
+		}
+	})
+
+	t.Run("invalid service name with slashes", func(t *testing.T) {
+		t.Parallel()
+		spec := &ServiceSpec{
+			Service: Service{Name: "my/service", Type: "native", Command: "echo"},
+		}
+		if err := spec.Validate(); err == nil {
+			t.Error("expected validation error for service name with slashes")
+		}
+	})
+
+	t.Run("invalid service name with dotdot", func(t *testing.T) {
+		t.Parallel()
+		spec := &ServiceSpec{
+			Service: Service{Name: "..badname", Type: "native", Command: "echo"},
+		}
+		if err := spec.Validate(); err == nil {
+			t.Error("expected validation error for service name starting with ..")
+		}
+	})
+}
+
+func TestValidateRoutingHostname(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid hostname", func(t *testing.T) {
+		t.Parallel()
+		spec := &ServiceSpec{
+			Service: Service{Name: "test", Type: "native", Command: "echo"},
+			Network: &Network{Port: 8080},
+			Routing: &Routing{Hostname: "my-service.example.local"},
+		}
+		if err := spec.Validate(); err != nil {
+			t.Errorf("expected valid hostname to pass, got: %v", err)
+		}
+	})
+
+	t.Run("invalid hostname with backtick", func(t *testing.T) {
+		t.Parallel()
+		spec := &ServiceSpec{
+			Service: Service{Name: "test", Type: "native", Command: "echo"},
+			Network: &Network{Port: 8080},
+			Routing: &Routing{Hostname: "bad`host.local"},
+		}
+		if err := spec.Validate(); err == nil {
+			t.Error("expected validation error for hostname with backtick")
+		}
+	})
 }
 
 func TestValidateHealthCheckTypes(t *testing.T) {
