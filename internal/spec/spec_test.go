@@ -9,6 +9,49 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestSpecHash(t *testing.T) {
+	t.Parallel()
+
+	s1 := &ServiceSpec{
+		Service: Service{Name: "test", Type: "native", Command: "echo hello"},
+		Env:     map[string]string{"FOO": "bar"},
+	}
+	s2 := &ServiceSpec{
+		Service: Service{Name: "test", Type: "native", Command: "echo hello"},
+		Env:     map[string]string{"FOO": "bar"},
+	}
+
+	h1 := s1.Hash()
+	h2 := s2.Hash()
+
+	if h1 == "" {
+		t.Fatal("expected non-empty hash")
+	}
+	if h1 != h2 {
+		t.Errorf("identical specs should produce same hash: %s != %s", h1, h2)
+	}
+
+	// Changing a field should produce a different hash
+	s2.Env["FOO"] = "baz"
+	h3 := s2.Hash()
+	if h1 == h3 {
+		t.Error("different specs should produce different hashes")
+	}
+
+	// Different port should produce different hash
+	s3 := &ServiceSpec{
+		Service: Service{Name: "test", Type: "native", Command: "echo hello"},
+		Network: &Network{Port: 8080},
+	}
+	s4 := &ServiceSpec{
+		Service: Service{Name: "test", Type: "native", Command: "echo hello"},
+		Network: &Network{Port: 9090},
+	}
+	if s3.Hash() == s4.Hash() {
+		t.Error("specs with different ports should produce different hashes")
+	}
+}
+
 func FuzzParseSpec(f *testing.F) {
 	// Seed with a valid spec
 	f.Add([]byte(`

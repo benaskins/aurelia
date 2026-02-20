@@ -48,6 +48,8 @@ type ManagedService struct {
 	adoptedDrv driver.Driver
 	// allocatedPort is set when the service uses dynamic port allocation
 	allocatedPort int
+	// specHash is the SHA-256 hash of the spec at startup, used for change detection on reload
+	specHash string
 }
 
 // NewManagedService creates a managed service from a spec.

@@ -156,6 +156,13 @@ func (d *Daemon) Start(ctx context.Context) error {
 	// Generate initial routing config
 	d.regenerateRouting()
 
+	// Start file watcher for auto-reload
+	go func() {
+		if err := d.StartWatcher(ctx); err != nil {
+			d.logger.Error("spec file watcher failed", "error", err)
+		}
+	}()
+
 	return nil
 }
 
@@ -339,6 +346,27 @@ func (d *Daemon) Reload(ctx context.Context) (*ReloadResult, error) {
 		}
 	}
 
+	// Restart changed services (spec content differs)
+	for name, ms := range d.services {
+		newSpec, exists := newSpecs[name]
+		if !exists {
+			continue // already removed above
+		}
+		newHash := newSpec.Hash()
+		if ms.specHash == newHash {
+			continue // unchanged
+		}
+		d.logger.Info("restarting changed service", "service", name)
+		ms.Stop(DefaultStopTimeout)
+		d.ports.Release(name)
+		delete(d.services, name)
+		if err := d.startServiceLocked(ctx, newSpec); err != nil {
+			d.logger.Error("failed to restart changed service", "service", name, "error", err)
+		} else {
+			result.Restarted = append(result.Restarted, name)
+		}
+	}
+
 	// Regenerate routing after reconciliation (write lock is held, use locked variant)
 	d.regenerateRoutingLocked()
 
@@ -347,8 +375,9 @@ func (d *Daemon) Reload(ctx context.Context) (*ReloadResult, error) {
 
 // ReloadResult summarizes what changed during a reload.
 type ReloadResult struct {
-	Added   []string `json:"added,omitempty"`
-	Removed []string `json:"removed,omitempty"`
+	Added     []string `json:"added,omitempty"`
+	Removed   []string `json:"removed,omitempty"`
+	Restarted []string `json:"restarted,omitempty"`
 }
 
 func (d *Daemon) startService(ctx context.Context, s *spec.ServiceSpec) error {
@@ -393,6 +422,7 @@ func (d *Daemon) startServiceLocked(ctx context.Context, s *spec.ServiceSpec) er
 		return err
 	}
 
+	ms.specHash = s.Hash()
 	d.services[s.Service.Name] = ms
 	d.logger.Info("started service", "service", s.Service.Name, "type", s.Service.Type)
 	return nil
@@ -487,6 +517,8 @@ func (d *Daemon) adoptService(ctx context.Context, s *spec.ServiceSpec, drv driv
 	if err := ms.Start(ctx); err != nil {
 		return err
 	}
+
+	ms.specHash = s.Hash()
 
 	d.mu.Lock()
 	d.services[s.Service.Name] = ms

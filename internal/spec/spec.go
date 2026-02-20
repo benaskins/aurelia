@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -145,6 +146,17 @@ func LoadDir(dir string) ([]*ServiceSpec, error) {
 	}
 
 	return specs, nil
+}
+
+// Hash returns a SHA-256 hex digest of the spec's canonical YAML representation.
+// Two specs with identical content produce the same hash regardless of field order.
+func (s *ServiceSpec) Hash() string {
+	data, err := yaml.Marshal(s)
+	if err != nil {
+		// Should never happen for a valid spec
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
 // NeedsDynamicPort returns true when the spec has a network block with port 0,

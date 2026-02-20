@@ -173,6 +173,69 @@ service:
 	}
 }
 
+func TestDaemonReloadDetectsChangedSpec(t *testing.T) {
+	dir := t.TempDir()
+	writeSpec(t, dir, "svc.yaml", `
+service:
+  name: svc
+  type: native
+  command: "sleep 10"
+
+env:
+  FOO: bar
+`)
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+
+	// Wait for process to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Get PID before reload
+	stateBefore, _ := d.ServiceState("svc")
+	pidBefore := stateBefore.PID
+
+	// Modify the spec (change env var)
+	writeSpec(t, dir, "svc.yaml", `
+service:
+  name: svc
+  type: native
+  command: "sleep 10"
+
+env:
+  FOO: baz
+`)
+
+	result, err := d.Reload(ctx)
+	if err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+
+	if len(result.Restarted) != 1 || result.Restarted[0] != "svc" {
+		t.Errorf("expected restarted=[svc], got %v", result.Restarted)
+	}
+	if len(result.Added) != 0 {
+		t.Errorf("expected no added, got %v", result.Added)
+	}
+	if len(result.Removed) != 0 {
+		t.Errorf("expected no removed, got %v", result.Removed)
+	}
+
+	// Wait for new process to start
+	time.Sleep(100 * time.Millisecond)
+
+	stateAfter, _ := d.ServiceState("svc")
+	if stateAfter.PID == pidBefore && pidBefore != 0 {
+		t.Error("expected PID to change after restart")
+	}
+}
+
 func TestDaemonReloadNoChanges(t *testing.T) {
 	dir := t.TempDir()
 	writeSpec(t, dir, "stable.yaml", `
@@ -196,8 +259,8 @@ service:
 		t.Fatalf("Reload: %v", err)
 	}
 
-	if len(result.Added) != 0 || len(result.Removed) != 0 {
-		t.Errorf("expected no changes, got added=%v removed=%v", result.Added, result.Removed)
+	if len(result.Added) != 0 || len(result.Removed) != 0 || len(result.Restarted) != 0 {
+		t.Errorf("expected no changes, got added=%v removed=%v restarted=%v", result.Added, result.Removed, result.Restarted)
 	}
 }
 
