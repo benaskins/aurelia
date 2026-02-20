@@ -5,6 +5,7 @@ import (
 )
 
 func TestRingBasicWrite(t *testing.T) {
+	t.Parallel()
 	r := New(5)
 	r.Write([]byte("line 1\nline 2\nline 3\n"))
 
@@ -18,6 +19,7 @@ func TestRingBasicWrite(t *testing.T) {
 }
 
 func TestRingOverflow(t *testing.T) {
+	t.Parallel()
 	r := New(3)
 	r.Write([]byte("a\nb\nc\nd\ne\n"))
 
@@ -31,6 +33,7 @@ func TestRingOverflow(t *testing.T) {
 }
 
 func TestRingPartialWrites(t *testing.T) {
+	t.Parallel()
 	r := New(5)
 	r.Write([]byte("hel"))
 	r.Write([]byte("lo world\n"))
@@ -46,6 +49,7 @@ func TestRingPartialWrites(t *testing.T) {
 }
 
 func TestRingLast(t *testing.T) {
+	t.Parallel()
 	r := New(10)
 	r.Write([]byte("a\nb\nc\nd\ne\n"))
 
@@ -59,6 +63,7 @@ func TestRingLast(t *testing.T) {
 }
 
 func TestRingLastMoreThanAvailable(t *testing.T) {
+	t.Parallel()
 	r := New(10)
 	r.Write([]byte("a\nb\n"))
 
@@ -69,6 +74,7 @@ func TestRingLastMoreThanAvailable(t *testing.T) {
 }
 
 func TestRingEmpty(t *testing.T) {
+	t.Parallel()
 	r := New(5)
 	lines := r.Lines()
 	if len(lines) != 0 {

@@ -11,6 +11,7 @@ func testStore() Store {
 }
 
 func TestSetAndGet(t *testing.T) {
+	t.Parallel()
 	s := testStore()
 
 	if err := s.Set("test/set-get", "hello-world"); err != nil {
@@ -27,6 +28,7 @@ func TestSetAndGet(t *testing.T) {
 }
 
 func TestGetNotFound(t *testing.T) {
+	t.Parallel()
 	s := testStore()
 
 	_, err := s.Get("test/nonexistent")
@@ -36,6 +38,7 @@ func TestGetNotFound(t *testing.T) {
 }
 
 func TestSetOverwrites(t *testing.T) {
+	t.Parallel()
 	s := testStore()
 
 	s.Set("test/overwrite", "first")
@@ -51,6 +54,7 @@ func TestSetOverwrites(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
+	t.Parallel()
 	s := testStore()
 
 	s.Set("test/delete", "to-delete")
@@ -66,6 +70,7 @@ func TestDelete(t *testing.T) {
 }
 
 func TestDeleteNonexistent(t *testing.T) {
+	t.Parallel()
 	s := testStore()
 
 	if err := s.Delete("test/never-existed"); err != nil {
@@ -74,6 +79,7 @@ func TestDeleteNonexistent(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
+	t.Parallel()
 	s := testStore()
 
 	s.Set("test/list-a", "val")
@@ -101,6 +107,7 @@ func TestList(t *testing.T) {
 }
 
 func TestGetMultiple(t *testing.T) {
+	t.Parallel()
 	s := testStore()
 
 	s.Set("test/multi-a", "val-a")
