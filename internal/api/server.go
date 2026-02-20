@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -19,12 +20,13 @@ import (
 
 // Server serves the aurelia REST API over a Unix socket.
 type Server struct {
-	daemon   *daemon.Daemon
-	gpu      *gpu.Observer
-	listener net.Listener
-	server   *http.Server
-	logger   *slog.Logger
-	token    string // bearer token for TCP auth (empty = no auth)
+	daemon    *daemon.Daemon
+	gpu       *gpu.Observer
+	listener  net.Listener
+	server    *http.Server
+	tcpServer *http.Server // separate server for TCP with auth middleware
+	logger    *slog.Logger
+	token     string // bearer token for TCP auth (empty = no auth)
 }
 
 // NewServer creates an API server backed by the given daemon.
@@ -100,7 +102,7 @@ func (s *Server) ListenTCP(addr string) error {
 	s.logger.Info("API listening", "addr", addr)
 
 	// Wrap with auth middleware for TCP connections
-	authed := &http.Server{
+	s.tcpServer = &http.Server{
 		Handler:           s.requireToken(s.server.Handler),
 		ReadTimeout:       s.server.ReadTimeout,
 		WriteTimeout:      s.server.WriteTimeout,
@@ -108,14 +110,19 @@ func (s *Server) ListenTCP(addr string) error {
 		IdleTimeout:       s.server.IdleTimeout,
 		MaxHeaderBytes:    s.server.MaxHeaderBytes,
 	}
-	return authed.Serve(ln)
+	return s.tcpServer.Serve(ln)
 }
 
 // requireToken returns middleware that validates the Authorization header.
 func (s *Server) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != s.token {
+		if !strings.HasPrefix(auth, "Bearer ") {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		provided := strings.TrimPrefix(auth, "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) != 1 {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
@@ -123,9 +130,15 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 	})
 }
 
-// Shutdown gracefully shuts down the API server.
+// Shutdown gracefully shuts down both the Unix and TCP API servers.
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.server.Shutdown(ctx)
+	err := s.server.Shutdown(ctx)
+	if s.tcpServer != nil {
+		if tcpErr := s.tcpServer.Shutdown(ctx); tcpErr != nil && err == nil {
+			err = tcpErr
+		}
+	}
+	return err
 }
 
 func (s *Server) listServices(w http.ResponseWriter, r *http.Request) {

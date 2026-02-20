@@ -185,14 +185,9 @@ var reloadCmd = &cobra.Command{
 	Short: "Reload service specs",
 	Long:  "Re-read spec files and reconcile: start new services, stop removed ones.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var result map[string]any
-		resp, err := apiClient().Post("http://aurelia/v1/reload", "application/json", nil)
+		result, err := apiPost("/v1/reload")
 		if err != nil {
-			return fmt.Errorf("connecting to daemon: %w", err)
-		}
-		defer resp.Body.Close()
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			return fmt.Errorf("decoding response: %w", err)
+			return err
 		}
 
 		if added, ok := result["added"]; ok {
