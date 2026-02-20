@@ -4,7 +4,6 @@ package driver
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 )
@@ -128,5 +127,4 @@ func TestContainerWait(t *testing.T) {
 	// Exit code from SIGTERM is typically 137 (128 + 9) or 143 (128 + 15)
 	// but with docker stop it may be 0 or the signal code
 	_ = exitCode
-	_ = strings.Contains // just to use the import
 }

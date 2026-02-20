@@ -430,6 +430,10 @@ func (ms *ManagedService) restartDelay() time.Duration {
 
 		for i := 0; i < count; i++ {
 			delay *= 2
+			if delay <= 0 { // overflow
+				delay = 24 * time.Hour
+				break
+			}
 		}
 
 		if maxDelay := ms.spec.Restart.MaxDelay.Duration; maxDelay > 0 && delay > maxDelay {

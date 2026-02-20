@@ -78,7 +78,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	// Create and start daemon with Keychain secret store
 	secrets := keychain.NewSystemStore()
-	stateDir := filepath.Join(filepath.Dir(specDir))
+	stateDir := filepath.Dir(specDir)
 	opts := []daemon.Option{daemon.WithSecrets(secrets), daemon.WithStateDir(stateDir)}
 	if routingOutput != "" {
 		opts = append(opts, daemon.WithRouting(routingOutput))

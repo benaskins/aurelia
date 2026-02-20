@@ -4,8 +4,6 @@ package daemon
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -97,13 +95,4 @@ restart:
 	}
 
 	d.Stop(10 * time.Second)
-}
-
-// writeSpec is redefined here because the test helper in daemon_test.go
-// is only available without the integration tag.
-func writeSpecInteg(t *testing.T, dir, name, content string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
 }
