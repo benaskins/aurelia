@@ -5,7 +5,51 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
+
+func FuzzParseSpec(f *testing.F) {
+	// Seed with a valid spec
+	f.Add([]byte(`
+service:
+  name: test
+  type: native
+  command: echo hello
+`))
+	// Seed with minimal spec
+	f.Add([]byte(`service: {name: x, type: native, command: y}`))
+	// Seed with container spec
+	f.Add([]byte(`
+service:
+  name: test
+  type: container
+  image: nginx
+`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var spec ServiceSpec
+		if err := yaml.Unmarshal(data, &spec); err != nil {
+			return // invalid input is fine
+		}
+		// If it parsed, validate shouldn't panic
+		_ = spec.Validate()
+	})
+}
+
+func FuzzServiceName(f *testing.F) {
+	f.Add("valid-name")
+	f.Add("a")
+	f.Add("")
+	f.Add("../../etc/passwd")
+	f.Add("name with spaces")
+	f.Fuzz(func(t *testing.T, name string) {
+		s := &ServiceSpec{
+			Service: Service{Name: name, Type: "native", Command: "echo"},
+		}
+		// Validate shouldn't panic regardless of input
+		_ = s.Validate()
+	})
+}
 
 func TestLoadValidContainerSpec(t *testing.T) {
 	t.Parallel()

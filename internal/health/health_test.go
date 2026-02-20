@@ -6,10 +6,37 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func FuzzHealthCheckPath(f *testing.F) {
+	f.Add("/health")
+	f.Add("/")
+	f.Add("/a/b/c?q=1")
+	f.Add("/@redirect")
+	f.Add("")
+	f.Fuzz(func(t *testing.T, path string) {
+		// Construct URL the same way the monitor does (see checkHTTP in health.go)
+		url := fmt.Sprintf("http://127.0.0.1:%d%s", 8080, path)
+		// Parsing shouldn't panic
+		parsed, err := neturl.Parse(url)
+		if err != nil {
+			return
+		}
+		// If the path doesn't start with /, it can alter the URL authority
+		// (e.g. path "@evil" makes "http://127.0.0.1:8080@evil").
+		// The spec validator already requires paths start with /, so we only
+		// check the invariant for well-formed paths.
+		if len(path) > 0 && path[0] == '/' {
+			if parsed.Hostname() != "127.0.0.1" {
+				t.Errorf("health URL host changed to %q for path %q", parsed.Hostname(), path)
+			}
+		}
+	})
+}
 
 func testLogger() *slog.Logger {
 	return slog.Default().With("test", true)
