@@ -73,13 +73,16 @@ func (ms *MetadataStore) Delete(key string) error {
 	return ms.save()
 }
 
-// All returns all metadata entries.
+// All returns copies of all metadata entries.
+// Each value is a deep copy to prevent callers from mutating internal state
+// without holding the lock (data race).
 func (ms *MetadataStore) All() map[string]*SecretMetadata {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 	result := make(map[string]*SecretMetadata, len(ms.metadata))
 	for k, v := range ms.metadata {
-		result[k] = v
+		cp := *v
+		result[k] = &cp
 	}
 	return result
 }

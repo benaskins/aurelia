@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -183,16 +184,18 @@ func VerifyProcess(pid int, expectedCommand string) bool {
 		return false
 	}
 
-	// Compare base names — the spec command may be a full path
-	expectedBase := expectedCommand
-	if idx := strings.LastIndex(expectedCommand, "/"); idx >= 0 {
-		expectedBase = expectedCommand[idx+1:]
+	// Extract the binary name from the command (first word), then compare base names.
+	// e.g. "sleep 10" → "sleep", "/usr/bin/python script.py" → "python"
+	parts := strings.Fields(expectedCommand)
+	if len(parts) == 0 {
+		return true
 	}
+	expectedBin := filepath.Base(parts[0])
 
 	actualBase := actual
 	if idx := strings.LastIndex(actual, "/"); idx >= 0 {
 		actualBase = actual[idx+1:]
 	}
 
-	return actualBase == expectedBase
+	return actualBase == expectedBin
 }
