@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/benaskins/aurelia/internal/spec"
 )
@@ -97,10 +98,7 @@ func (g *depGraph) stopOrder() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Reverse
-	for i, j := 0, len(order)-1; i < j; i, j = i+1, j-1 {
-		order[i], order[j] = order[j], order[i]
-	}
+	slices.Reverse(order)
 	return order, nil
 }
 

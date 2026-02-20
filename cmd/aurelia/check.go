@@ -79,9 +79,9 @@ func checkDir(dir string) error {
 }
 
 func defaultSpecDir() string {
-	home, err := os.UserHomeDir()
+	dir, err := aureliaHome()
 	if err != nil {
 		return "."
 	}
-	return filepath.Join(home, ".aurelia", "services")
+	return filepath.Join(dir, "services")
 }

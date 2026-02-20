@@ -12,11 +12,11 @@ import (
 // Requires an unlocked login Keychain and an interactive session
 // (first run may prompt for Keychain access approval).
 
-func integrationStore() *KeychainStore {
-	return &KeychainStore{service: "com.aurelia.test"}
+func integrationStore() *SystemStore {
+	return &SystemStore{service: "com.aurelia.test"}
 }
 
-func cleanupIntegration(t *testing.T, s *KeychainStore, keys ...string) {
+func cleanupIntegration(t *testing.T, s *SystemStore, keys ...string) {
 	t.Helper()
 	for _, k := range keys {
 		s.Delete(k)
