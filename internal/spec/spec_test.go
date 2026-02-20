@@ -350,6 +350,20 @@ func TestValidateHealthCheckTypes(t *testing.T) {
 	if err := s.Validate(); err == nil {
 		t.Error("expected error for invalid health check type")
 	}
+
+	// http path not starting with /
+	s = base
+	s.Health = &HealthCheck{Type: "http", Path: "health", Interval: Duration{10 * time.Second}, Timeout: Duration{2 * time.Second}}
+	if err := s.Validate(); err == nil {
+		t.Error("expected error for http health check path not starting with /")
+	}
+
+	// http path starting with / is valid
+	s = base
+	s.Health = &HealthCheck{Type: "http", Path: "/health", Interval: Duration{10 * time.Second}, Timeout: Duration{2 * time.Second}}
+	if err := s.Validate(); err != nil {
+		t.Errorf("expected http health check with valid path to pass, got: %v", err)
+	}
 }
 
 func TestValidateRestartPolicy(t *testing.T) {

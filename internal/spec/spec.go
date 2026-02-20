@@ -186,6 +186,9 @@ func (s *ServiceSpec) Validate() error {
 			if h.Path == "" {
 				return fmt.Errorf("health.path is required for http health checks")
 			}
+			if h.Path[0] != '/' {
+				return fmt.Errorf("health.path must start with /, got %q", h.Path)
+			}
 		case "tcp":
 			// port is sufficient
 		case "exec":
