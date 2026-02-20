@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -91,7 +92,13 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	// Start API server
 	socketPath := defaultSocketPath()
-	// Remove stale socket
+	// Check if another daemon is already running
+	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
+	if err == nil {
+		conn.Close()
+		return fmt.Errorf("another daemon is already running (socket %s is active)", socketPath)
+	}
+	// Stale socket — safe to remove
 	os.Remove(socketPath)
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {
 		return fmt.Errorf("creating socket dir: %w", err)
