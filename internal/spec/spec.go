@@ -13,6 +13,7 @@ import (
 var (
 	serviceNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
 	hostnameRe    = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$`)
+	networkModeRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 )
 
 // ServiceSpec is the top-level structure for a service definition.
@@ -177,11 +178,8 @@ func (s *ServiceSpec) Validate() error {
 			return fmt.Errorf("service.command is not valid for container services")
 		}
 		if nm := s.Service.NetworkMode; nm != "" {
-			switch nm {
-			case "host", "bridge", "none":
-				// ok
-			default:
-				return fmt.Errorf("service.network_mode must be \"host\", \"bridge\", or \"none\", got %q", nm)
+			if !networkModeRe.MatchString(nm) {
+				return fmt.Errorf("service.network_mode contains invalid characters, got %q", nm)
 			}
 		}
 	default:

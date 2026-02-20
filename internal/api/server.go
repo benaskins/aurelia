@@ -151,7 +151,7 @@ func (s *Server) getService(w http.ResponseWriter, r *http.Request) {
 	state, err := s.daemon.ServiceState(name)
 	if err != nil {
 		s.logger.Warn("getService: service not found", "service", name, "error", err)
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "service not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": errorMessage("service not found", err, r)})
 		return
 	}
 	writeJSON(w, http.StatusOK, state)
@@ -161,7 +161,7 @@ func (s *Server) startService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if err := s.daemon.StartService(r.Context(), name); err != nil {
 		s.logger.Error("startService: failed to start service", "service", name, "error", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to start service"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errorMessage("failed to start service", err, r)})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "starting"})
@@ -171,7 +171,7 @@ func (s *Server) stopService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if err := s.daemon.StopService(name, daemon.DefaultStopTimeout); err != nil {
 		s.logger.Error("stopService: failed to stop service", "service", name, "error", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to stop service"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errorMessage("failed to stop service", err, r)})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping"})
@@ -181,7 +181,7 @@ func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if err := s.daemon.RestartService(r.Context(), name, daemon.DefaultStopTimeout); err != nil {
 		s.logger.Error("restartService: failed to restart service", "service", name, "error", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to restart service"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errorMessage("failed to restart service", err, r)})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
@@ -191,7 +191,7 @@ func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
 	result, err := s.daemon.Reload(r.Context())
 	if err != nil {
 		s.logger.Error("reload: failed to reload daemon", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": errorMessage("reload failed", err, r)})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -215,4 +215,20 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Error("failed to encode JSON response", "error", err)
 	}
+}
+
+// errorMessage returns the full error for Unix socket clients (already
+// authenticated by file permissions) or a generic message for TCP clients.
+func errorMessage(generic string, err error, r *http.Request) string {
+	if isUnixSocket(r) {
+		return err.Error()
+	}
+	return generic
+}
+
+// isUnixSocket returns true if the request arrived via a Unix socket.
+// Unix socket connections have an empty RemoteAddr or one starting with @.
+func isUnixSocket(r *http.Request) bool {
+	addr := r.RemoteAddr
+	return addr == "" || strings.HasPrefix(addr, "@")
 }

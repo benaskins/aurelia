@@ -297,7 +297,7 @@ func TestValidateServiceSpec(t *testing.T) {
 		{
 			name: "invalid network_mode on container service",
 			spec: &ServiceSpec{
-				Service: Service{Name: "test", Type: "container", Image: "foo:bar", NetworkMode: "macvlan"},
+				Service: Service{Name: "test", Type: "container", Image: "foo:bar", NetworkMode: "../escape"},
 			},
 		},
 	}
@@ -516,7 +516,7 @@ func TestValidateRequiresMustBeInAfter(t *testing.T) {
 func TestValidateContainerNetworkMode(t *testing.T) {
 	t.Parallel()
 
-	validModes := []string{"host", "bridge", "none"}
+	validModes := []string{"host", "bridge", "none", "macvlan", "overlay", "my-network", "custom_net.1"}
 	for _, mode := range validModes {
 		mode := mode
 		t.Run("valid_"+mode, func(t *testing.T) {
@@ -540,7 +540,7 @@ func TestValidateContainerNetworkMode(t *testing.T) {
 		}
 	})
 
-	invalidModes := []string{"macvlan", "overlay", "custom", "HOST", "Bridge"}
+	invalidModes := []string{"../escape", "-dash", ".dot", "has space", "semi;colon"}
 	for _, mode := range invalidModes {
 		mode := mode
 		t.Run("invalid_"+mode, func(t *testing.T) {
