@@ -37,6 +37,7 @@ type Daemon struct {
 	state    *stateFile
 	mu       sync.RWMutex
 	logger   *slog.Logger
+	ctx      context.Context // daemon lifecycle context, set in Start()
 }
 
 // NewDaemon creates a new daemon that manages services from the given spec directory.
@@ -89,6 +90,8 @@ func WithRouting(outputPath string) Option {
 
 // Start loads all specs and starts all services in dependency order.
 func (d *Daemon) Start(ctx context.Context) error {
+	d.ctx = ctx
+
 	specs, err := spec.LoadDir(d.specDir)
 	if err != nil {
 		return fmt.Errorf("loading specs: %w", err)
@@ -269,11 +272,13 @@ func (d *Daemon) StopService(name string, timeout time.Duration) error {
 }
 
 // RestartService stops and restarts a service.
-func (d *Daemon) RestartService(ctx context.Context, name string, timeout time.Duration) error {
+// It uses the daemon's lifecycle context (not the caller's) so the new
+// service outlives short-lived request contexts.
+func (d *Daemon) RestartService(name string, timeout time.Duration) error {
 	if err := d.StopService(name, timeout); err != nil {
 		return err
 	}
-	return d.StartService(ctx, name)
+	return d.StartService(d.ctx, name)
 }
 
 // ServiceStates returns the state of all managed services.
@@ -302,7 +307,9 @@ func (d *Daemon) ServiceState(name string) (ServiceState, error) {
 }
 
 // Reload re-reads specs and reconciles: start new, stop removed, restart changed.
-func (d *Daemon) Reload(ctx context.Context) (*ReloadResult, error) {
+// It uses the daemon's lifecycle context for starting services so they outlive
+// short-lived request contexts.
+func (d *Daemon) Reload(_ context.Context) (*ReloadResult, error) {
 	specs, err := spec.LoadDir(d.specDir)
 	if err != nil {
 		return nil, fmt.Errorf("loading specs: %w", err)
@@ -338,7 +345,7 @@ func (d *Daemon) Reload(ctx context.Context) (*ReloadResult, error) {
 	for name, s := range newSpecs {
 		if _, exists := d.services[name]; !exists {
 			d.logger.Info("adding service", "service", name)
-			if err := d.startServiceLocked(ctx, s); err != nil {
+			if err := d.startServiceLocked(d.ctx, s); err != nil {
 				d.logger.Error("failed to start new service", "service", name, "error", err)
 			} else {
 				result.Added = append(result.Added, name)
@@ -360,7 +367,7 @@ func (d *Daemon) Reload(ctx context.Context) (*ReloadResult, error) {
 		ms.Stop(DefaultStopTimeout)
 		d.ports.Release(name)
 		delete(d.services, name)
-		if err := d.startServiceLocked(ctx, newSpec); err != nil {
+		if err := d.startServiceLocked(d.ctx, newSpec); err != nil {
 			d.logger.Error("failed to restart changed service", "service", name, "error", err)
 		} else {
 			result.Restarted = append(result.Restarted, name)

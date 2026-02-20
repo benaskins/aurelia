@@ -179,7 +179,7 @@ func (s *Server) stopService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if err := s.daemon.RestartService(r.Context(), name, daemon.DefaultStopTimeout); err != nil {
+	if err := s.daemon.RestartService(name, daemon.DefaultStopTimeout); err != nil {
 		s.logger.Error("restartService: failed to restart service", "service", name, "error", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errorMessage("failed to restart service", err, r)})
 		return
