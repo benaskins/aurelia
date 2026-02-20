@@ -12,12 +12,12 @@ import (
 
 // Info holds a snapshot of GPU state.
 type Info struct {
-	Name             string  `json:"name"`
-	AllocatedBytes   uint64  `json:"allocated_bytes"`
-	RecommendedMax   uint64  `json:"recommended_max_bytes"`
-	UsagePercent     float64 `json:"usage_percent"`
-	ThermalState     string  `json:"thermal_state"` // "nominal", "fair", "serious", "critical"
-	HasUnifiedMemory bool    `json:"has_unified_memory"`
+	Name             string    `json:"name"`
+	AllocatedBytes   uint64    `json:"allocated_bytes"`
+	RecommendedMax   uint64    `json:"recommended_max_bytes"`
+	UsagePercent     float64   `json:"usage_percent"`
+	ThermalState     string    `json:"thermal_state"` // "nominal", "fair", "serious", "critical"
+	HasUnifiedMemory bool      `json:"has_unified_memory"`
 	Timestamp        time.Time `json:"timestamp"`
 }
 

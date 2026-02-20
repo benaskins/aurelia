@@ -59,7 +59,7 @@ service:
   name: api
   type: native
   command: ./bin/api
-  working_dir: /home/user/myproject
+  working_dir: ~/myproject
 
 network:
   port: 8080
@@ -247,7 +247,9 @@ Supporting packages: `internal/health` (health probes), `internal/keychain` (Key
 
 **Only load specs you trust.** Do not load specs from untrusted sources without reviewing them first. The spec directory (`~/.aurelia/services/`) should have permissions that prevent other users from writing to it.
 
-**Unix socket authentication** is implicit: access to `~/.aurelia/aurelia.sock` is controlled by filesystem permissions. Only processes running as the same user can connect to the daemon. The socket is not exposed on the network by default.
+**Unix socket authentication** is implicit: access to `~/.aurelia/aurelia.sock` is controlled by filesystem permissions (0600). Only processes running as the same user can connect to the daemon.
+
+**TCP API authentication** is required when the daemon is started with `--api-addr`. A random bearer token is generated on startup and written to `~/.aurelia/api.token` (0600). All TCP API requests must include the `Authorization: Bearer <token>` header. The token file is removed on clean shutdown. The Unix socket does not require a token.
 
 **macOS Keychain** stores secrets in the user's login keychain, scoped to the aurelia process. Secret access is recorded in an append-only audit log at `~/.aurelia/audit.log`.
 
@@ -263,6 +265,7 @@ All runtime files are stored under `~/.aurelia/`:
 | `aurelia.sock` | Unix socket for CLI-to-daemon IPC |
 | `audit.log` | Append-only NDJSON log of secret operations |
 | `secret-metadata.json` | Secret rotation metadata |
+| `api.token` | Bearer token for TCP API auth (created when `--api-addr` is set) |
 | `daemon.log` | Stdout/stderr when running as a LaunchAgent |
 
 ## License

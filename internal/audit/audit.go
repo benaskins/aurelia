@@ -28,7 +28,7 @@ type Entry struct {
 	Action    Action    `json:"action"`
 	Key       string    `json:"key"`
 	Service   string    `json:"service,omitempty"`
-	Actor     string    `json:"actor,omitempty"`  // "cli", "daemon", "rotation"
+	Actor     string    `json:"actor,omitempty"`   // "cli", "daemon", "rotation"
 	Trigger   string    `json:"trigger,omitempty"` // "service_start", "manual", "hook"
 	Command   string    `json:"command,omitempty"` // rotation command if applicable
 	Error     string    `json:"error,omitempty"`

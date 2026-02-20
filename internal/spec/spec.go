@@ -31,11 +31,11 @@ type ServiceSpec struct {
 
 type Service struct {
 	Name        string `yaml:"name"`
-	Type        string `yaml:"type"`                  // "native" | "container"
+	Type        string `yaml:"type"`                   // "native" | "container"
 	Command     string `yaml:"command,omitempty"`      // native only
 	WorkingDir  string `yaml:"working_dir,omitempty"`  // native only
 	Image       string `yaml:"image,omitempty"`        // container only
-	NetworkMode string `yaml:"network_mode,omitempty"` // container only, default "bridge"
+	NetworkMode string `yaml:"network_mode,omitempty"` // container only, default "host"
 }
 
 type Network struct {

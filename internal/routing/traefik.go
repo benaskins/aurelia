@@ -76,9 +76,9 @@ type traefikHTTP struct {
 }
 
 type traefikRouter struct {
-	Rule        string   `yaml:"rule"`
-	EntryPoints []string `yaml:"entryPoints"`
-	Service     string   `yaml:"service"`
+	Rule        string            `yaml:"rule"`
+	EntryPoints []string          `yaml:"entryPoints"`
+	Service     string            `yaml:"service"`
 	TLS         *traefikRouterTLS `yaml:"tls,omitempty"`
 }
 
@@ -111,8 +111,8 @@ func (g *TraefikGenerator) buildConfig(routes []ServiceRoute) traefikConfig {
 		serviceName := sanitizeName(r.Name)
 
 		router := &traefikRouter{
-			Rule:        fmt.Sprintf("Host(`%s`)", r.Hostname),
-			Service:     serviceName,
+			Rule:    fmt.Sprintf("Host(`%s`)", r.Hostname),
+			Service: serviceName,
 		}
 
 		if r.TLS {

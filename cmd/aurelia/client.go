@@ -37,7 +37,7 @@ func apiGet(path string, v any) error {
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return fmt.Errorf("API error (%d): %s", resp.StatusCode, body)
+		return fmt.Errorf("API error %d: %s", resp.StatusCode, body)
 	}
 
 	return json.NewDecoder(resp.Body).Decode(v)

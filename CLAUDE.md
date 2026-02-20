@@ -32,7 +32,7 @@ Aurelia is a **macOS-native process supervisor** — a developer-focused alterna
    - `ContainerDriver` — Docker via `docker/docker` client
    - `AdoptedDriver` — attaches to existing PID for crash recovery
 3. **Daemon** (`internal/daemon`) — orchestrates `ManagedService` instances, each running a supervision goroutine. Handles dependency graph (topological sort for startup/shutdown ordering, cascade-stop for hard deps), state persistence (`~/.aurelia/state.json`), and Traefik config generation
-4. **API** (`internal/api`) — REST over Unix socket (`~/.aurelia/aurelia.sock`). Uses Go 1.22+ `http.ServeMux` pattern syntax
+4. **API** (`internal/api`) — REST over Unix socket (`~/.aurelia/aurelia.sock`), with optional TCP listener (`--api-addr`) protected by bearer token auth (`~/.aurelia/api.token`). Uses Go 1.22+ `http.ServeMux` pattern syntax
 5. **CLI** (`cmd/aurelia`) — cobra commands; `daemon` runs in-process, all others are HTTP clients to the API
 
 ### Supporting packages
