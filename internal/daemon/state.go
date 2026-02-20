@@ -64,7 +64,11 @@ func (sf *stateFile) save(records map[string]ServiceRecord) error {
 		return err
 	}
 
-	return os.WriteFile(sf.path, data, 0600)
+	tmpPath := sf.path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, sf.path)
 }
 
 func (sf *stateFile) set(name string, rec ServiceRecord) error {
@@ -117,5 +121,9 @@ func (sf *stateFile) saveUnsafe(records map[string]ServiceRecord) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(sf.path, data, 0600)
+	tmpPath := sf.path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, sf.path)
 }

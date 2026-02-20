@@ -43,11 +43,18 @@ func NewMetadataStore(path string) (*MetadataStore, error) {
 	return ms, nil
 }
 
-// Get returns metadata for a key, or nil if not tracked.
+// Get returns a copy of the metadata for a key, or nil if not tracked.
+// Returning a copy prevents callers from mutating the store's internal state
+// without holding the lock (data race).
 func (ms *MetadataStore) Get(key string) *SecretMetadata {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
-	return ms.metadata[key]
+	m, ok := ms.metadata[key]
+	if !ok {
+		return nil
+	}
+	cp := *m
+	return &cp
 }
 
 // Set records metadata for a key and persists to disk.
@@ -82,7 +89,11 @@ func (ms *MetadataStore) save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ms.path, data, 0600)
+	tmpPath := ms.path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, ms.path)
 }
 
 // AuditedStore wraps a Store and adds audit logging and metadata tracking.
