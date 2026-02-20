@@ -93,7 +93,8 @@ func (s *Server) getService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	state, err := s.daemon.ServiceState(name)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		s.logger.Warn("getService: service not found", "service", name, "error", err)
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "service not found"})
 		return
 	}
 	writeJSON(w, http.StatusOK, state)
@@ -102,7 +103,8 @@ func (s *Server) getService(w http.ResponseWriter, r *http.Request) {
 func (s *Server) startService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if err := s.daemon.StartService(r.Context(), name); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		s.logger.Error("startService: failed to start service", "service", name, "error", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to start service"})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "starting"})
@@ -111,7 +113,8 @@ func (s *Server) startService(w http.ResponseWriter, r *http.Request) {
 func (s *Server) stopService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if err := s.daemon.StopService(name, daemon.DefaultStopTimeout); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		s.logger.Error("stopService: failed to stop service", "service", name, "error", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to stop service"})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping"})
@@ -120,7 +123,8 @@ func (s *Server) stopService(w http.ResponseWriter, r *http.Request) {
 func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if err := s.daemon.RestartService(r.Context(), name, daemon.DefaultStopTimeout); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		s.logger.Error("restartService: failed to restart service", "service", name, "error", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to restart service"})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
@@ -129,7 +133,8 @@ func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
 func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
 	result, err := s.daemon.Reload(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.logger.Error("reload: failed to reload daemon", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
