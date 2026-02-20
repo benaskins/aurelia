@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/gpu"
@@ -41,7 +42,14 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	mux.HandleFunc("GET /v1/gpu", s.gpuInfo)
 	mux.HandleFunc("GET /v1/health", s.health)
 
-	s.server = &http.Server{Handler: mux}
+	s.server = &http.Server{
+		Handler:           mux,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1MB
+	}
 	return s
 }
 
@@ -142,5 +150,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("failed to encode JSON response", "error", err)
+	}
 }
