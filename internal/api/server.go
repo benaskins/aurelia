@@ -231,10 +231,11 @@ func (s *Server) deployService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serviceLogs(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+	const maxLogLines = 10000
 	n := 100
 	if qn := r.URL.Query().Get("n"); qn != "" {
 		if parsed, err := strconv.Atoi(qn); err == nil && parsed > 0 {
-			n = parsed
+			n = min(parsed, maxLogLines)
 		}
 	}
 	lines, err := s.daemon.ServiceLogs(name, n)
@@ -244,7 +245,6 @@ func (s *Server) serviceLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"lines": lines})
 }
-
 func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
 	result, err := s.daemon.Reload(r.Context())
 	if err != nil {

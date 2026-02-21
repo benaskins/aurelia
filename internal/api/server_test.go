@@ -376,3 +376,37 @@ func TestTCPRequiresToken(t *testing.T) {
 		t.Fatal("expected error when calling ListenTCP without GenerateToken")
 	}
 }
+
+func TestServiceLogsCapN(t *testing.T) {
+	_, client := setupTestServer(t, map[string]string{
+		"svc.yaml": `
+service:
+  name: log-svc
+  type: native
+  command: "echo hello"
+`,
+	})
+
+	// Wait for process to run and produce output
+	time.Sleep(200 * time.Millisecond)
+
+	// Request an absurdly large number of lines — should be capped, not OOM
+	resp, err := client.Get("http://aurelia/v1/services/log-svc/logs?n=999999999")
+	if err != nil {
+		t.Fatalf("GET logs: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	// The response should succeed without hanging or OOM
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if result["lines"] == nil {
+		t.Error("expected lines field in response")
+	}
+}
