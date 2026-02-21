@@ -216,6 +216,64 @@ func (m *Monitor) check(ctx context.Context) {
 	}
 }
 
+// SingleCheck runs one health check with the given config and returns nil if healthy.
+// Unlike Monitor, it does not track state or run periodically.
+func SingleCheck(cfg Config) error {
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+	defer cancel()
+
+	switch cfg.Type {
+	case "http":
+		return checkHTTP(ctx, cfg)
+	case "tcp":
+		return checkTCP(ctx, cfg)
+	case "exec":
+		return checkExec(ctx, cfg)
+	default:
+		return fmt.Errorf("unknown health check type: %s", cfg.Type)
+	}
+}
+
+// checkHTTP performs a single HTTP health check (standalone version).
+func checkHTTP(ctx context.Context, cfg Config) error {
+	url := fmt.Sprintf("http://127.0.0.1:%d%s", cfg.Port, cfg.Path)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	client := &http.Client{Timeout: cfg.Timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("unhealthy status: %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// checkTCP performs a single TCP health check (standalone version).
+func checkTCP(ctx context.Context, cfg Config) error {
+	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
+	dialer := net.Dialer{Timeout: cfg.Timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("tcp connect failed: %w", err)
+	}
+	conn.Close()
+	return nil
+}
+
+// checkExec performs a single exec health check (standalone version).
+func checkExec(ctx context.Context, cfg Config) error {
+	cmd := exec.CommandContext(ctx, "sh", "-c", cfg.Command)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("command failed: %w", err)
+	}
+	return nil
+}
+
 func (m *Monitor) checkHTTP(ctx context.Context) error {
 	url := fmt.Sprintf("http://127.0.0.1:%d%s", m.cfg.Port, m.cfg.Path)
 

@@ -105,6 +105,91 @@ func TestPortLookup(t *testing.T) {
 	}
 }
 
+func TestAllocateTemporary(t *testing.T) {
+	a := NewAllocator(20000, 20100)
+	p, err := a.AllocateTemporary("chat", "deploy")
+	if err != nil {
+		t.Fatalf("AllocateTemporary: %v", err)
+	}
+	if p < 20000 || p > 20100 {
+		t.Errorf("port %d outside range", p)
+	}
+	// Should be accessible via the compound key
+	if got := a.Port("chat__deploy"); got != p {
+		t.Errorf("expected port %d via compound key, got %d", p, got)
+	}
+}
+
+func TestAllocateTemporaryIdempotent(t *testing.T) {
+	a := NewAllocator(20000, 20100)
+	p1, _ := a.AllocateTemporary("chat", "deploy")
+	p2, _ := a.AllocateTemporary("chat", "deploy")
+	if p1 != p2 {
+		t.Errorf("expected idempotent allocation, got %d and %d", p1, p2)
+	}
+}
+
+func TestReleaseTemporary(t *testing.T) {
+	a := NewAllocator(20000, 20000) // single port
+	p1, err := a.AllocateTemporary("chat", "deploy")
+	if err != nil {
+		t.Fatalf("AllocateTemporary: %v", err)
+	}
+	a.ReleaseTemporary("chat", "deploy")
+
+	// Port should be available again
+	p2, err := a.Allocate("other")
+	if err != nil {
+		t.Fatalf("Allocate after release: %v", err)
+	}
+	if p1 != p2 {
+		t.Errorf("expected reuse of port %d, got %d", p1, p2)
+	}
+}
+
+func TestReassign(t *testing.T) {
+	a := NewAllocator(20000, 20100)
+	p, _ := a.AllocateTemporary("chat", "deploy")
+
+	if err := a.Reassign("chat__deploy", "chat"); err != nil {
+		t.Fatalf("Reassign: %v", err)
+	}
+	// Old key should be gone
+	if got := a.Port("chat__deploy"); got != 0 {
+		t.Errorf("expected 0 for old key, got %d", got)
+	}
+	// New key should have the port
+	if got := a.Port("chat"); got != p {
+		t.Errorf("expected port %d for new key, got %d", p, got)
+	}
+}
+
+func TestReassignFromMissing(t *testing.T) {
+	a := NewAllocator(20000, 20100)
+	if err := a.Reassign("nonexistent", "chat"); err == nil {
+		t.Error("expected error when reassigning from missing key")
+	}
+}
+
+func TestReassignToExisting(t *testing.T) {
+	a := NewAllocator(20000, 20100)
+	a.AllocateTemporary("chat", "deploy")
+	a.Allocate("chat")
+
+	if err := a.Reassign("chat__deploy", "chat"); err == nil {
+		t.Error("expected error when reassigning to existing key")
+	}
+}
+
+func TestTemporaryDoesNotConflictWithPrimary(t *testing.T) {
+	a := NewAllocator(20000, 20100)
+	p1, _ := a.Allocate("chat")
+	p2, _ := a.AllocateTemporary("chat", "deploy")
+	if p1 == p2 {
+		t.Errorf("temporary and primary got same port: %d", p1)
+	}
+}
+
 func TestRangeExhaustion(t *testing.T) {
 	a := NewAllocator(20000, 20000) // single port
 	_, err := a.Allocate("svc-a")

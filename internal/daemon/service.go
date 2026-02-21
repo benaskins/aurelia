@@ -308,6 +308,86 @@ func (ms *ManagedService) supervise(ctx context.Context) {
 	}
 }
 
+// superviseExisting runs a supervision loop for an already-running process.
+// Used after blue-green deploy promotion to monitor the new instance.
+func (ms *ManagedService) superviseExisting(ctx context.Context, drv driver.Driver) {
+	defer func() {
+		ms.mu.Lock()
+		ms.cancel = nil
+		close(ms.stopped)
+		ms.mu.Unlock()
+	}()
+
+	// Wait for process to exit OR health check to trigger restart
+	select {
+	case <-ms.waitForExit(drv):
+		// Process exited
+		ms.mu.Lock()
+		monitor := ms.monitor
+		ms.mu.Unlock()
+		if monitor != nil {
+			monitor.Stop()
+		}
+	case <-ms.unhealthyCh:
+		// Health check triggered restart
+		ms.logger.Warn("restarting due to health check failure (post-deploy)")
+		ms.mu.Lock()
+		monitor := ms.monitor
+		ms.mu.Unlock()
+		if monitor != nil {
+			monitor.Stop()
+		}
+		drv.Stop(ctx, 30*time.Second)
+		drv.Wait()
+	case <-ctx.Done():
+		return
+	}
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	exitCode := drv.Info().ExitCode
+	ms.logger.Info("process exited (post-deploy)", "exit_code", exitCode)
+
+	// After the deployed process exits, fall into the normal restart loop
+	if !ms.shouldRestart() {
+		ms.logger.Info("restart policy exhausted, giving up (post-deploy)")
+		return
+	}
+
+	policy := "on-failure"
+	if ms.spec.Restart != nil {
+		policy = ms.spec.Restart.Policy
+	}
+
+	switch policy {
+	case "never":
+		return
+	case "on-failure":
+		if exitCode == 0 {
+			return
+		}
+	case "always":
+		// Continue to restart
+	}
+
+	ms.mu.Lock()
+	ms.restartCount++
+	ms.mu.Unlock()
+
+	delay := ms.restartDelay()
+	ms.logger.Info("restarting after delay (post-deploy)", "delay", delay)
+
+	select {
+	case <-time.After(delay):
+		// Fall into the normal supervision loop
+		ms.supervise(ctx)
+	case <-ctx.Done():
+		return
+	}
+}
+
 func (ms *ManagedService) waitForExit(drv driver.Driver) <-chan struct{} {
 	ch := make(chan struct{})
 	go func() {
@@ -352,6 +432,35 @@ func (ms *ManagedService) startHealthMonitor(ctx context.Context) *health.Monito
 	return monitor
 }
 
+// createDriverWithPort creates a driver configured to listen on the given port.
+// Used during blue-green deploys.
+func (ms *ManagedService) createDriverWithPort(port int) driver.Driver {
+	env := ms.buildEnvWithPort(port)
+
+	switch ms.spec.Service.Type {
+	case "container":
+		d, err := driver.NewContainer(driver.ContainerConfig{
+			Name:        ms.spec.Service.Name + "-deploy",
+			Image:       ms.spec.Service.Image,
+			Env:         env,
+			Cmd:         ms.spec.Args,
+			NetworkMode: ms.spec.Service.NetworkMode,
+			Volumes:     ms.spec.Volumes,
+		})
+		if err != nil {
+			ms.logger.Error("failed to create container driver for deploy", "error", err)
+			return driver.NewNative(driver.NativeConfig{Command: "false"})
+		}
+		return d
+	default:
+		return driver.NewNative(driver.NativeConfig{
+			Command:    ms.spec.Service.Command,
+			Env:        env,
+			WorkingDir: ms.spec.Service.WorkingDir,
+		})
+	}
+}
+
 func (ms *ManagedService) createDriver() driver.Driver {
 	env := ms.buildEnv()
 
@@ -378,6 +487,38 @@ func (ms *ManagedService) createDriver() driver.Driver {
 			WorkingDir: ms.spec.Service.WorkingDir,
 		})
 	}
+}
+
+// buildEnvWithPort builds the environment with an explicit port override.
+// Used during blue-green deploys to start a new instance on a temporary port.
+func (ms *ManagedService) buildEnvWithPort(port int) []string {
+	// For native: inherit host env. For containers: clean env.
+	var env []string
+	if ms.spec.Service.Type == "native" {
+		env = os.Environ()
+	}
+
+	// Use the provided port override
+	env = append(env, fmt.Sprintf("PORT=%d", port))
+
+	for k, v := range ms.spec.Env {
+		env = append(env, k+"="+v)
+	}
+
+	// Resolve secrets from Keychain and inject as env vars
+	if ms.secrets != nil && len(ms.spec.Secrets) > 0 {
+		for envVar, ref := range ms.spec.Secrets {
+			val, err := ms.secrets.Get(ref.Keychain)
+			if err != nil {
+				ms.logger.Warn("secret not found, skipping", "env_var", envVar, "keychain_key", ref.Keychain, "error", err)
+				continue
+			}
+			env = append(env, envVar+"="+val)
+			ms.logger.Info("injected secret", "env_var", envVar)
+		}
+	}
+
+	return env
 }
 
 func (ms *ManagedService) buildEnv() []string {

@@ -104,6 +104,40 @@ func (a *Allocator) Port(serviceName string) int {
 	return a.allocated[serviceName]
 }
 
+// AllocateTemporary allocates a port under a compound key "service__suffix".
+// Used for blue-green deploys where a second instance needs a temporary port.
+func (a *Allocator) AllocateTemporary(service, suffix string) (int, error) {
+	key := service + "__" + suffix
+	return a.Allocate(key)
+}
+
+// ReleaseTemporary frees a temporary port allocation.
+func (a *Allocator) ReleaseTemporary(service, suffix string) {
+	key := service + "__" + suffix
+	a.Release(key)
+}
+
+// Reassign atomically moves a port allocation from one key to another.
+// The fromKey must exist and the toKey must not already have a port allocated.
+func (a *Allocator) Reassign(fromKey, toKey string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	port, ok := a.allocated[fromKey]
+	if !ok {
+		return fmt.Errorf("no allocation for key %q", fromKey)
+	}
+
+	if _, exists := a.allocated[toKey]; exists {
+		return fmt.Errorf("key %q already has a port allocated", toKey)
+	}
+
+	delete(a.allocated, fromKey)
+	a.allocated[toKey] = port
+	a.usedPorts[port] = toKey
+	return nil
+}
+
 func isPortAvailable(port int) bool {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {

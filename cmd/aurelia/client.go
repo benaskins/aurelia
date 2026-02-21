@@ -194,6 +194,38 @@ var restartCmd = &cobra.Command{
 	},
 }
 
+// deploy command
+var deployCmd = &cobra.Command{
+	Use:   "deploy <service>",
+	Short: "Zero-downtime deploy a service",
+	Long:  "Performs a blue-green deploy: starts new instance, verifies health, switches routing, drains old.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		drain, _ := cmd.Flags().GetString("drain")
+		path := fmt.Sprintf("/v1/services/%s/deploy", args[0])
+		if drain != "" {
+			path += "?drain=" + drain
+		}
+		client := apiClient()
+		client.Timeout = 5 * time.Minute // deploy can take a while
+		resp, err := client.Post("http://aurelia"+path, "application/json", nil)
+		if err != nil {
+			return fmt.Errorf("connecting to daemon: %w (is aurelia daemon running?)", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			return fmt.Errorf("deploy failed: %s", body)
+		}
+
+		var result map[string]any
+		json.NewDecoder(resp.Body).Decode(&result)
+		fmt.Printf("%s: %v\n", args[0], result["status"])
+		return nil
+	},
+}
+
 // reload command
 var reloadCmd = &cobra.Command{
 	Use:   "reload",
@@ -243,11 +275,13 @@ var logsCmd = &cobra.Command{
 
 func init() {
 	logsCmd.Flags().IntP("lines", "n", 50, "number of lines to show")
+	deployCmd.Flags().String("drain", "5s", "drain period before stopping old instance")
 
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(upCmd)
 	rootCmd.AddCommand(downCmd)
 	rootCmd.AddCommand(restartCmd)
+	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(reloadCmd)
 	rootCmd.AddCommand(logsCmd)
 }

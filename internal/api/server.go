@@ -45,6 +45,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	mux.HandleFunc("POST /v1/services/{name}/start", s.startService)
 	mux.HandleFunc("POST /v1/services/{name}/stop", s.stopService)
 	mux.HandleFunc("POST /v1/services/{name}/restart", s.restartService)
+	mux.HandleFunc("POST /v1/services/{name}/deploy", s.deployService)
 	mux.HandleFunc("GET /v1/services/{name}/logs", s.serviceLogs)
 	mux.HandleFunc("POST /v1/reload", s.reload)
 	mux.HandleFunc("GET /v1/gpu", s.gpuInfo)
@@ -53,7 +54,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	s.server = &http.Server{
 		Handler:           mux,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      5 * time.Minute, // deploy endpoint blocks for health checks + drain
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20, // 1MB
@@ -187,6 +188,23 @@ func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
+}
+
+func (s *Server) deployService(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	drain := daemon.DefaultDrainTimeout
+	if d := r.URL.Query().Get("drain"); d != "" {
+		if parsed, err := time.ParseDuration(d); err == nil && parsed > 0 {
+			drain = parsed
+		}
+	}
+	s.logger.Info("deploy request", "service", name, "drain", drain)
+	if err := s.daemon.DeployService(name, drain); err != nil {
+		s.logger.Error("deployService: failed to deploy service", "service", name, "error", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errorMessage("failed to deploy service", err, r)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deployed"})
 }
 
 func (s *Server) serviceLogs(w http.ResponseWriter, r *http.Request) {

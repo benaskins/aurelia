@@ -416,3 +416,95 @@ func TestResultDuration(t *testing.T) {
 		t.Errorf("expected duration >= 40ms, got %v", result.Duration)
 	}
 }
+
+func TestSingleCheckHTTPHealthy(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	})
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(listener)
+	defer srv.Close()
+
+	err = SingleCheck(Config{
+		Type:    "http",
+		Path:    "/health",
+		Port:    port,
+		Timeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Errorf("expected healthy, got error: %v", err)
+	}
+}
+
+func TestSingleCheckHTTPUnhealthy(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	})
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(listener)
+	defer srv.Close()
+
+	err = SingleCheck(Config{
+		Type:    "http",
+		Path:    "/health",
+		Port:    port,
+		Timeout: 2 * time.Second,
+	})
+	if err == nil {
+		t.Error("expected error for unhealthy service")
+	}
+}
+
+func TestSingleCheckTCP(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	err = SingleCheck(Config{
+		Type:    "tcp",
+		Port:    port,
+		Timeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Errorf("expected healthy TCP, got error: %v", err)
+	}
+}
+
+func TestSingleCheckExec(t *testing.T) {
+	if err := SingleCheck(Config{Type: "exec", Command: "true", Timeout: 2 * time.Second}); err != nil {
+		t.Errorf("expected healthy exec, got error: %v", err)
+	}
+	if err := SingleCheck(Config{Type: "exec", Command: "false", Timeout: 2 * time.Second}); err == nil {
+		t.Error("expected error for failing exec")
+	}
+}
+
+func TestSingleCheckUnknownType(t *testing.T) {
+	if err := SingleCheck(Config{Type: "grpc", Timeout: 2 * time.Second}); err == nil {
+		t.Error("expected error for unknown type")
+	}
+}
