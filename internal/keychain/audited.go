@@ -179,24 +179,6 @@ func (s *AuditedStore) Delete(key string) error {
 	return nil
 }
 
-func (s *AuditedStore) GetMultiple(keys []string) (map[string]string, error) {
-	result, err := s.inner.GetMultiple(keys)
-	if err != nil {
-		return nil, fmt.Errorf("audited store get multiple: %w", err)
-	}
-
-	for key := range result {
-		// Audit logging is best-effort — a failure to log should not block the operation.
-		s.audit.Log(audit.Entry{
-			Action: audit.ActionSecretRead,
-			Key:    key,
-			Actor:  s.actor,
-		})
-	}
-
-	return result, nil
-}
-
 // GetForService retrieves a secret and logs it as a service-start read.
 func (s *AuditedStore) GetForService(key, service string) (string, error) {
 	val, err := s.inner.Get(key)

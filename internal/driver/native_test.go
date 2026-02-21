@@ -49,13 +49,16 @@ func TestNativeStdoutCapture(t *testing.T) {
 
 	d.Wait()
 
-	// Read captured output
-	buf := make([]byte, 1024)
-	n, _ := d.Stdout().Read(buf)
-	output := string(buf[:n])
-
-	if !strings.Contains(output, "hello world") {
-		t.Errorf("expected 'hello world' in output, got %q", output)
+	lines := d.LogLines(10)
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, "hello world") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'hello world' in log lines, got %v", lines)
 	}
 }
 
@@ -120,9 +123,11 @@ func TestNativeEnvironment(t *testing.T) {
 
 	d.Wait()
 
-	buf := make([]byte, 1024)
-	n, _ := d.Stdout().Read(buf)
-	output := strings.TrimSpace(string(buf[:n]))
+	lines := d.LogLines(10)
+	if len(lines) == 0 {
+		t.Fatal("expected log output")
+	}
+	output := strings.TrimSpace(lines[0])
 
 	if output != "aurelia_test_value" {
 		t.Errorf("expected 'aurelia_test_value', got %q", output)

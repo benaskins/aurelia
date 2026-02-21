@@ -2,7 +2,6 @@ package driver
 
 import (
 	"context"
-	"io"
 	"time"
 )
 
@@ -42,9 +41,6 @@ type Driver interface {
 
 	// Wait blocks until the process exits and returns the exit code.
 	Wait() (int, error)
-
-	// Stdout returns a reader for the process's combined stdout/stderr output.
-	Stdout() io.Reader
 
 	// LogLines returns the last n lines from the log buffer.
 	LogLines(n int) []string

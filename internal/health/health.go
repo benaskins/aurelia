@@ -34,10 +34,8 @@ type Config struct {
 
 // Result is the outcome of a single health check.
 type Result struct {
-	Status   Status
-	Message  string
-	Duration time.Duration
-	Time     time.Time
+	Status  Status
+	Message string
 }
 
 // Monitor runs periodic health checks and tracks state.
@@ -48,7 +46,6 @@ type Monitor struct {
 
 	mu               sync.Mutex
 	status           Status
-	lastResult       *Result
 	consecutiveFails int
 	cancel           context.CancelFunc
 	done             chan struct{}
@@ -102,17 +99,6 @@ func (m *Monitor) CurrentStatus() Status {
 	return m.status
 }
 
-// LastResult returns the most recent check result.
-func (m *Monitor) LastResult() *Result {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.lastResult == nil {
-		return nil
-	}
-	r := *m.lastResult
-	return &r
-}
-
 func (m *Monitor) run(ctx context.Context) {
 	defer func() {
 		m.mu.Lock()
@@ -150,9 +136,7 @@ func (m *Monitor) check(ctx context.Context) {
 	checkCtx, cancel := context.WithTimeout(ctx, m.cfg.Timeout)
 	defer cancel()
 
-	start := time.Now()
 	var result Result
-	result.Time = start
 
 	var err error
 	switch m.cfg.Type {
@@ -165,8 +149,6 @@ func (m *Monitor) check(ctx context.Context) {
 	default:
 		err = fmt.Errorf("unknown health check type: %s", m.cfg.Type)
 	}
-
-	result.Duration = time.Since(start)
 
 	// Don't record results from cancelled context — the monitor is shutting down
 	if ctx.Err() != nil {
@@ -182,7 +164,6 @@ func (m *Monitor) check(ctx context.Context) {
 	}
 
 	m.mu.Lock()
-	m.lastResult = &result
 	prevStatus := m.status
 
 	if result.Status == StatusHealthy {

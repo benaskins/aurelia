@@ -369,20 +369,21 @@ func TestManagedServiceSecretInjection(t *testing.T) {
 
 	ms.Stop(5 * time.Second)
 
-	// Check stdout captured the secret
+	// Check log output captured the secret
 	if ms.drv == nil {
 		t.Fatal("expected driver to exist")
 	}
 
-	stdout := ms.drv.Stdout()
-	buf := make([]byte, 1024)
-	n, _ := stdout.Read(buf)
-	output := string(buf[:n])
-
+	lines := ms.drv.LogLines(10)
 	expected := "postgres://secret@localhost/db"
-	if output == "" {
-		t.Error("expected secret to be in stdout")
-	} else if strings.TrimSpace(output) != expected {
-		t.Errorf("expected %q, got %q", expected, output)
+	found := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == expected {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected secret %q in log output, got %v", expected, lines)
 	}
 }

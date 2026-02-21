@@ -105,26 +105,3 @@ func TestList(t *testing.T) {
 		}
 	}
 }
-
-func TestGetMultiple(t *testing.T) {
-	t.Parallel()
-	s := testStore()
-
-	s.Set("test/multi-a", "val-a")
-	s.Set("test/multi-b", "val-b")
-
-	result, err := s.GetMultiple([]string{"test/multi-a", "test/multi-b", "test/multi-missing"})
-	if err != nil {
-		t.Fatalf("GetMultiple: %v", err)
-	}
-
-	if result["test/multi-a"] != "val-a" {
-		t.Errorf("expected val-a, got %q", result["test/multi-a"])
-	}
-	if result["test/multi-b"] != "val-b" {
-		t.Errorf("expected val-b, got %q", result["test/multi-b"])
-	}
-	if _, ok := result["test/multi-missing"]; ok {
-		t.Error("expected missing key to be absent")
-	}
-}

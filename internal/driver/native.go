@@ -3,7 +3,6 @@ package driver
 import (
 	"context"
 	"fmt"
-	"io"
 	"os/exec"
 	"strings"
 	"sync"
@@ -185,10 +184,6 @@ func (d *NativeDriver) Wait() (int, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.exitCode, nil
-}
-
-func (d *NativeDriver) Stdout() io.Reader {
-	return d.buf.Reader()
 }
 
 func (d *NativeDriver) LogLines(n int) []string {

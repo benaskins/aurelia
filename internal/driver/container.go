@@ -3,7 +3,6 @@ package driver
 import (
 	"context"
 	"fmt"
-	"io"
 	"sync"
 	"time"
 
@@ -171,12 +170,6 @@ func (d *ContainerDriver) Stop(ctx context.Context, timeout time.Duration) error
 	return nil
 }
 
-// Close releases the Docker client connection.
-func (d *ContainerDriver) Close() error {
-	d.closeClient()
-	return nil
-}
-
 func (d *ContainerDriver) closeClient() {
 	d.closeOnce.Do(func() {
 		d.client.Close()
@@ -207,10 +200,6 @@ func (d *ContainerDriver) Wait() (int, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.exitCode, nil
-}
-
-func (d *ContainerDriver) Stdout() io.Reader {
-	return d.buf.Reader()
 }
 
 func (d *ContainerDriver) LogLines(n int) []string {

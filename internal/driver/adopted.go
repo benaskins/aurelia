@@ -3,7 +3,6 @@ package driver
 import (
 	"context"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -11,8 +10,6 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/benaskins/aurelia/internal/logbuf"
 )
 
 // AdoptedDriver monitors an existing process by PID (crash recovery).
@@ -24,7 +21,6 @@ type AdoptedDriver struct {
 	startedAt time.Time
 	exitCode  int
 	exitErr   string
-	buf       *logbuf.Ring
 	done      chan struct{}
 	stopCh    chan struct{} // signals monitor to stop polling
 }
@@ -41,7 +37,6 @@ func NewAdopted(pid int) (*AdoptedDriver, error) {
 		pid:       pid,
 		state:     StateRunning,
 		startedAt: time.Now(),
-		buf:       logbuf.New(100),
 		done:      make(chan struct{}),
 		stopCh:    make(chan struct{}),
 	}
@@ -159,10 +154,6 @@ func (d *AdoptedDriver) Wait() (int, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.exitCode, nil
-}
-
-func (d *AdoptedDriver) Stdout() io.Reader {
-	return d.buf.Reader()
 }
 
 func (d *AdoptedDriver) LogLines(n int) []string {

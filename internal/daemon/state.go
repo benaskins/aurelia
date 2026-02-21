@@ -18,12 +18,11 @@ type stateFile struct {
 
 // ServiceRecord is the persisted state of a running service.
 type ServiceRecord struct {
-	PID         int    `json:"pid,omitempty"`
-	Type        string `json:"type"`
-	ContainerID string `json:"container_id,omitempty"`
-	Port        int    `json:"port,omitempty"`
-	StartedAt   int64  `json:"started_at,omitempty"` // Unix timestamp
-	Command     string `json:"command,omitempty"`    // process command for PID reuse detection
+	PID       int    `json:"pid,omitempty"`
+	Type      string `json:"type"`
+	Port      int    `json:"port,omitempty"`
+	StartedAt int64  `json:"started_at,omitempty"` // Unix timestamp
+	Command   string `json:"command,omitempty"`    // process command for PID reuse detection
 }
 
 func newStateFile(dir string) *stateFile {
@@ -81,18 +80,6 @@ func (sf *stateFile) set(name string, rec ServiceRecord) error {
 	}
 	records[name] = rec
 
-	return sf.saveUnsafe(records)
-}
-
-func (sf *stateFile) remove(name string) error {
-	sf.mu.Lock()
-	defer sf.mu.Unlock()
-
-	records, err := sf.loadUnsafe()
-	if err != nil || records == nil {
-		return nil
-	}
-	delete(records, name)
 	return sf.saveUnsafe(records)
 }
 

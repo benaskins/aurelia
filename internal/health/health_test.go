@@ -80,14 +80,6 @@ func TestHTTPHealthCheck(t *testing.T) {
 	if m.CurrentStatus() != StatusHealthy {
 		t.Errorf("expected healthy, got %v", m.CurrentStatus())
 	}
-
-	result := m.LastResult()
-	if result == nil {
-		t.Fatal("expected a result")
-	}
-	if result.Status != StatusHealthy {
-		t.Errorf("expected healthy result, got %v", result.Status)
-	}
 }
 
 func TestHTTPHealthCheckUnhealthy(t *testing.T) {
@@ -387,33 +379,6 @@ func TestRecoveryFromUnhealthy(t *testing.T) {
 
 	if m.CurrentStatus() != StatusHealthy {
 		t.Errorf("expected recovery to healthy, got %v", m.CurrentStatus())
-	}
-}
-
-func TestResultDuration(t *testing.T) {
-	cfg := Config{
-		Type:               "exec",
-		Command:            fmt.Sprintf("sleep 0.05"),
-		Interval:           200 * time.Millisecond,
-		Timeout:            2 * time.Second,
-		UnhealthyThreshold: 3,
-	}
-
-	m := NewMonitor(cfg, testLogger(), nil)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	m.Start(ctx)
-	time.Sleep(300 * time.Millisecond)
-	m.Stop()
-
-	result := m.LastResult()
-	if result == nil {
-		t.Fatal("expected a result")
-	}
-	if result.Duration < 40*time.Millisecond {
-		t.Errorf("expected duration >= 40ms, got %v", result.Duration)
 	}
 }
 

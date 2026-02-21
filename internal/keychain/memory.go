@@ -51,15 +51,3 @@ func (s *MemoryStore) Delete(key string) error {
 	delete(s.secrets, key)
 	return nil
 }
-
-func (s *MemoryStore) GetMultiple(keys []string) (map[string]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make(map[string]string, len(keys))
-	for _, key := range keys {
-		if val, ok := s.secrets[key]; ok {
-			result[key] = val
-		}
-	}
-	return result, nil
-}

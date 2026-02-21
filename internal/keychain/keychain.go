@@ -20,5 +20,4 @@ type Store interface {
 	Get(key string) (string, error)
 	List() ([]string, error)
 	Delete(key string) error
-	GetMultiple(keys []string) (map[string]string, error)
 }

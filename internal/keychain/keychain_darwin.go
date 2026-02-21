@@ -80,17 +80,3 @@ func (s *SystemStore) Delete(key string) error {
 	}
 	return nil
 }
-
-// GetMultiple retrieves multiple secrets at once, returning a map of key->value.
-// Missing keys are silently skipped.
-func (s *SystemStore) GetMultiple(keys []string) (map[string]string, error) {
-	result := make(map[string]string, len(keys))
-	for _, key := range keys {
-		val, err := s.Get(key)
-		if err != nil {
-			continue
-		}
-		result[key] = val
-	}
-	return result, nil
-}
