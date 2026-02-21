@@ -658,3 +658,34 @@ func TestDaemonEmptyDir(t *testing.T) {
 
 	d.Stop(5 * time.Second)
 }
+
+func TestRedeployAdoptedInterruptibleSleep(t *testing.T) {
+	// Verify that redeployAdopted returns promptly when context is cancelled
+	// during the sleep period, even with a long redeployWait.
+	dir := t.TempDir()
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	d.ctx = ctx
+
+	d.adopted = []string{"nonexistent"}
+	d.redeployWait = 30 * time.Second // long wait that would hang without fix
+
+	done := make(chan struct{})
+	go func() {
+		d.redeployAdopted()
+		close(done)
+	}()
+
+	// Give the goroutine time to enter the sleep
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel context — redeployAdopted should wake up promptly
+	cancel()
+
+	select {
+	case <-done:
+		// success — exited promptly
+	case <-time.After(2 * time.Second):
+		t.Fatal("redeployAdopted did not exit promptly after context cancellation during sleep")
+	}
+}
