@@ -45,19 +45,22 @@ func setupTestServer(t *testing.T, specs map[string]string) (*Server, *http.Clie
 
 	// Wait for socket to be ready
 	for i := 0; i < 20; i++ {
-		if _, err := net.Dial("unix", sockPath); err == nil {
+		conn, err := net.Dial("unix", sockPath)
+		if err == nil {
+			conn.Close()
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", sockPath)
-			},
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial("unix", sockPath)
 		},
 	}
+	t.Cleanup(func() { transport.CloseIdleConnections() })
+
+	client := &http.Client{Transport: transport}
 
 	return srv, client
 }
