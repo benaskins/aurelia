@@ -92,11 +92,8 @@ func TestContainerWithEnv(t *testing.T) {
 	d.Stop(ctx, 5*time.Second)
 
 	// Check logs for env output
-	stdout := d.Stdout()
-	buf := make([]byte, 4096)
-	n, _ := stdout.Read(buf)
-	output := string(buf[:n])
-	_ = output // Logs may or may not contain env info depending on container entrypoint
+	lines := d.LogLines(10)
+	_ = lines // Logs may or may not contain env info depending on container entrypoint
 }
 
 func TestContainerWait(t *testing.T) {
