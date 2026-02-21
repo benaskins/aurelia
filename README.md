@@ -354,6 +354,13 @@ Aurelia is structured in layers:
 
 Supporting packages: `internal/health` (health probes), `internal/keychain` (Keychain + audit log), `internal/gpu` (Metal/IOKit via cgo), `internal/routing` (Traefik config generation), `internal/port` (dynamic port allocation), `internal/logbuf` (ring buffer log capture).
 
+## What Aurelia Is Not
+
+- **Not a production deployment tool.** Aurelia is for local development. It has no clustering, no remote node management, and no production hardening. Use systemd, Kubernetes, or Nomad for production workloads.
+- **Not a container orchestrator.** Container support is a convenience for running infrastructure dependencies (Postgres, Redis) alongside native services. If all your services run in containers, docker-compose is a better fit.
+- **Not cross-platform.** Aurelia uses macOS Keychain, Apple Silicon GPU APIs, and LaunchAgent integration. There are no plans to support Linux or Windows — that would mean removing the features that make it worth using.
+- **Not a build tool.** Aurelia runs your binaries; it doesn't compile them. Pair it with `just`, `make`, or `go build` as you normally would.
+
 ## License
 
 MIT
