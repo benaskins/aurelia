@@ -430,3 +430,60 @@ func TestManagedServiceSecretInjection(t *testing.T) {
 		t.Errorf("expected secret %q in log output, got %v", expected, lines)
 	}
 }
+
+func TestManagedServiceStopNotRunning(t *testing.T) {
+	s := &spec.ServiceSpec{
+		Service: spec.Service{
+			Name:    "test-stop-idle",
+			Type:    "native",
+			Command: "sleep 60",
+		},
+		Restart: &spec.RestartPolicy{
+			Policy: "never",
+		},
+	}
+
+	ms, err := NewManagedService(s, nil)
+	if err != nil {
+		t.Fatalf("failed to create: %v", err)
+	}
+
+	// Do NOT call Start — Stop on a never-started service should return nil
+	if err := ms.Stop(5 * time.Second); err != nil {
+		t.Errorf("expected nil error stopping idle service, got %v", err)
+	}
+}
+
+func TestManagedServiceStopExternal(t *testing.T) {
+	s := &spec.ServiceSpec{
+		Service: spec.Service{
+			Name: "test-ext-stop",
+			Type: "external",
+		},
+		Health: &spec.HealthCheck{
+			Type:               "tcp",
+			Port:               19879,
+			Interval:           spec.Duration{Duration: 50 * time.Millisecond},
+			Timeout:            spec.Duration{Duration: 100 * time.Millisecond},
+			UnhealthyThreshold: 2,
+		},
+	}
+
+	ms, err := NewManagedService(s, nil)
+	if err != nil {
+		t.Fatalf("failed to create: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := ms.Start(ctx); err != nil {
+		t.Fatalf("failed to start: %v", err)
+	}
+
+	// Wait for health monitoring to begin
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop should return nil and not hang
+	if err := ms.Stop(5 * time.Second); err != nil {
+		t.Errorf("expected nil error stopping external service, got %v", err)
+	}
+}

@@ -689,3 +689,174 @@ func TestRedeployAdoptedInterruptibleSleep(t *testing.T) {
 		t.Fatal("redeployAdopted did not exit promptly after context cancellation during sleep")
 	}
 }
+
+func TestDaemonStopDependencyOrder(t *testing.T) {
+	dir := t.TempDir()
+	writeSpec(t, dir, "db.yaml", `
+service:
+  name: db
+  type: native
+  command: "sleep 10"
+`)
+	writeSpec(t, dir, "api.yaml", `
+service:
+  name: api
+  type: native
+  command: "sleep 10"
+
+dependencies:
+  after: [db]
+`)
+	writeSpec(t, dir, "web.yaml", `
+service:
+  name: web
+  type: native
+  command: "sleep 10"
+
+dependencies:
+  after: [api]
+`)
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	states := d.ServiceStates()
+	if len(states) != 3 {
+		t.Fatalf("expected 3 services, got %d", len(states))
+	}
+
+	d.Stop(5 * time.Second)
+
+	// After Stop, all services should be stopped
+	for _, s := range d.ServiceStates() {
+		if s.State == "running" {
+			t.Errorf("service %s still running after Stop", s.Name)
+		}
+	}
+}
+
+func TestDaemonStopFallbackParallel(t *testing.T) {
+	dir := t.TempDir()
+	writeSpec(t, dir, "svc-a.yaml", `
+service:
+  name: svc-a
+  type: native
+  command: "sleep 10"
+`)
+	writeSpec(t, dir, "svc-b.yaml", `
+service:
+  name: svc-b
+  type: native
+  command: "sleep 10"
+`)
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Force fallback to parallel stop path by clearing deps
+	d.mu.Lock()
+	d.deps = nil
+	d.mu.Unlock()
+
+	// This should not panic or hang — the test passing is the assertion
+	d.Stop(5 * time.Second)
+}
+
+func TestDaemonStopServiceCascade(t *testing.T) {
+	dir := t.TempDir()
+	writeSpec(t, dir, "db.yaml", `
+service:
+  name: db
+  type: native
+  command: "sleep 10"
+`)
+	writeSpec(t, dir, "api.yaml", `
+service:
+  name: api
+  type: native
+  command: "sleep 10"
+
+dependencies:
+  after: [db]
+  requires: [db]
+`)
+	writeSpec(t, dir, "web.yaml", `
+service:
+  name: web
+  type: native
+  command: "sleep 10"
+
+dependencies:
+  after: [api]
+  requires: [api]
+`)
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for all processes to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Stopping db should cascade to api and web via requires
+	if err := d.StopService("db", 5*time.Second); err != nil {
+		t.Fatalf("StopService(db): %v", err)
+	}
+
+	// Wait for cascade
+	time.Sleep(200 * time.Millisecond)
+
+	for _, name := range []string{"api", "web"} {
+		state, err := d.ServiceState(name)
+		if err != nil {
+			t.Fatalf("ServiceState(%s): %v", name, err)
+		}
+		if state.State == "running" {
+			t.Errorf("expected %s to be stopped after cascade, got %s", name, state.State)
+		}
+	}
+
+	// Clean up
+	d.Stop(5 * time.Second)
+}
+
+func TestDaemonStopServiceNotFound(t *testing.T) {
+	dir := t.TempDir()
+	writeSpec(t, dir, "echo.yaml", `
+service:
+  name: echo
+  type: native
+  command: "sleep 10"
+`)
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+
+	err := d.StopService("nonexistent", 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error for nonexistent service")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected error to contain 'not found', got %q", err.Error())
+	}
+}

@@ -211,3 +211,61 @@ func TestNativeStopReturnsAfterSIGKILL(t *testing.T) {
 		t.Errorf("expected stopped or failed state, got %v", info.State)
 	}
 }
+
+func TestNativeStopSIGTERMIgnored(t *testing.T) {
+	// Process traps SIGTERM — Stop should escalate to SIGKILL
+	d := NewNative(NativeConfig{
+		Command: `bash -c "trap '' TERM; sleep 60"`,
+	})
+
+	ctx := context.Background()
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("failed to start: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- d.Stop(ctx, 100*time.Millisecond)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Stop() hung — SIGKILL escalation did not work")
+	}
+
+	info := d.Info()
+	if info.State != StateStopped && info.State != StateFailed {
+		t.Errorf("expected stopped or failed state, got %v", info.State)
+	}
+}
+
+func TestNativeStopContextCancelled(t *testing.T) {
+	d := NewNative(NativeConfig{
+		Command: "sleep 60",
+	})
+
+	// Start with a fresh context
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("failed to start: %v", err)
+	}
+
+	// Create a pre-cancelled context
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Stop with the cancelled context — should return ctx.Err()
+	err := d.Stop(cancelledCtx, 30*time.Second)
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+
+	// Process should still be stopped/failed (SIGKILL sent on ctx cancel)
+	info := d.Info()
+	if info.State != StateStopped && info.State != StateFailed {
+		t.Errorf("expected stopped or failed state, got %v", info.State)
+	}
+}
