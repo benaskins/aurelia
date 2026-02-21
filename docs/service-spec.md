@@ -79,7 +79,7 @@ service:
   # network_mode: host     # default "host"
 
 network:
-  port: 8080               # 0 = allocate dynamically from port range
+  port: 8080               # 0 = allocate dynamically; injected as $PORT env var
 
 health:
   type: http               # "http", "tcp", or "exec"
@@ -134,6 +134,12 @@ dependencies:
 | `working_dir` | string | Working directory for the process (native only) |
 | `image` | string | Container image (container only) |
 | `network_mode` | string | Docker network mode, default `host` (container only) |
+
+### `network`
+
+| Field | Type | Description |
+|---|---|---|
+| `port` | int | Listen port. Set to `0` for dynamic allocation — aurelia picks a free port and injects it as the `PORT` environment variable. Your binary must read `$PORT` to know which port to bind. |
 
 ### `dependencies`
 
