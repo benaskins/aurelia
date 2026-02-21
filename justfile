@@ -15,8 +15,11 @@ lint:
 fmt:
     go fmt ./...
 
+build-lean:
+    go build -tags nocontainer,nogpu -ldflags "-s -w -X main.version={{version}}" -o aurelia-lean ./cmd/aurelia/
+
 clean:
-    rm -f aurelia
+    rm -f aurelia aurelia-lean
 
 install-hooks:
     printf '#!/bin/sh\ngofmt -w .\ngit diff --quiet || { echo "gofmt reformatted files — re-stage and commit again"; exit 1; }\n' > .git/hooks/pre-commit
