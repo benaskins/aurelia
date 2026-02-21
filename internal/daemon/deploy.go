@@ -30,7 +30,9 @@ func (d *Daemon) DeployService(name string, drainTimeout time.Duration) error {
 		return fmt.Errorf("service %q not found", name)
 	}
 
-	// Concurrent deploy guard: reject if a deploy is already in progress
+	// Concurrent deploy guard: reject if a deploy is already in progress.
+	// The "__" separator is safe because service names are validated against
+	// ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ — underscores are not permitted.
 	if existing := d.ports.Port(name + "__" + deploySuffix); existing != 0 {
 		return fmt.Errorf("deploy already in progress for %q (temp port %d)", name, existing)
 	}

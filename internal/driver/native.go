@@ -136,7 +136,7 @@ func (d *NativeDriver) Stop(ctx context.Context, timeout time.Duration) error {
 	pid := d.cmd.Process.Pid
 	d.mu.Unlock()
 
-	// Send SIGTERM to the process group
+	// Send SIGTERM to the process group (may already be exited)
 	_ = syscall.Kill(-pid, syscall.SIGTERM)
 
 	// Wait for exit or timeout
@@ -144,12 +144,12 @@ func (d *NativeDriver) Stop(ctx context.Context, timeout time.Duration) error {
 	case <-d.done:
 		return nil
 	case <-time.After(timeout):
-		// Force kill the process group
+		// Force kill the process group (may already be exited)
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 		<-d.done
 		return nil
 	case <-ctx.Done():
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = syscall.Kill(-pid, syscall.SIGKILL) // may already be exited
 		<-d.done
 		return ctx.Err()
 	}

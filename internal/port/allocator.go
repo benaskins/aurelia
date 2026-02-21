@@ -41,7 +41,14 @@ func (a *Allocator) Allocate(serviceName string) (int, error) {
 		return 0, fmt.Errorf("port range exhausted (%d-%d)", a.minPort, a.maxPort)
 	}
 
-	// Try random ports until we find one that's available
+	// Try random ports until we find one that's available.
+	// isPortAvailable performs a listen-and-close test. There's an inherent TOCTOU
+	// race between this check and the service binding the port — another process
+	// could claim it in between. This is acceptable because:
+	// 1. The port range (default 20000-32000) rarely conflicts with other services
+	// 2. If a collision occurs, the service start fails and the supervisor retries
+	// 3. Holding the listener open until handoff would require fd passing,
+	//    adding significant complexity for a rare edge case
 	for attempts := 0; attempts < rangeSize*2; attempts++ {
 		port := a.minPort + rand.Intn(rangeSize)
 		if _, taken := a.usedPorts[port]; taken {
