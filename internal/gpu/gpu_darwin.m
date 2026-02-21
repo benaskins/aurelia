@@ -1,3 +1,5 @@
+//go:build darwin && !nogpu
+
 #import <Metal/Metal.h>
 #import <Foundation/Foundation.h>
 #import <IOKit/IOKitLib.h>
