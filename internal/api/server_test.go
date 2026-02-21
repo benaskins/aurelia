@@ -1,13 +1,16 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -408,5 +411,59 @@ service:
 	}
 	if result["lines"] == nil {
 		t.Error("expected lines field in response")
+	}
+}
+
+func TestListenTCPNonLoopbackWarning(t *testing.T) {
+	d := daemon.NewDaemon(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("daemon start: %v", err)
+	}
+	t.Cleanup(func() { d.Stop(5 * time.Second) })
+
+	srv := NewServer(d, nil)
+	tokenPath := filepath.Join(t.TempDir(), "api.token")
+	if err := srv.GenerateToken(tokenPath); err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+
+	var buf bytes.Buffer
+	srv.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	go srv.ListenTCP("0.0.0.0:0")
+	time.Sleep(100 * time.Millisecond)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	if !strings.Contains(buf.String(), "non-loopback") {
+		t.Errorf("expected non-loopback warning in logs, got: %s", buf.String())
+	}
+}
+
+func TestListenTCPLoopbackNoWarning(t *testing.T) {
+	d := daemon.NewDaemon(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("daemon start: %v", err)
+	}
+	t.Cleanup(func() { d.Stop(5 * time.Second) })
+
+	srv := NewServer(d, nil)
+	tokenPath := filepath.Join(t.TempDir(), "api.token")
+	if err := srv.GenerateToken(tokenPath); err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+
+	var buf bytes.Buffer
+	srv.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	go srv.ListenTCP("127.0.0.1:0")
+	time.Sleep(100 * time.Millisecond)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	if strings.Contains(buf.String(), "non-loopback") {
+		t.Errorf("unexpected non-loopback warning for 127.0.0.1: %s", buf.String())
 	}
 }

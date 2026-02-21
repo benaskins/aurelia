@@ -98,6 +98,18 @@ func (s *Server) ListenTCP(addr string) error {
 	if s.token == "" {
 		return fmt.Errorf("TCP API requires authentication; call GenerateToken first")
 	}
+
+	// Warn if binding to a non-loopback address
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		switch host {
+		case "127.0.0.1", "::1", "localhost":
+			// loopback — safe
+		default:
+			s.logger.Warn("TCP API binding to non-loopback address — the API will be accessible from other machines on the network",
+				"addr", addr)
+		}
+	}
+
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
