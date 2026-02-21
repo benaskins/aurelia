@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/benaskins/aurelia/internal/logbuf"
 )
@@ -178,28 +178,33 @@ func VerifyProcess(pid int, expectedCommand string) bool {
 		return true // no command recorded, best effort
 	}
 
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+	actual, err := processName(pid)
 	if err != nil {
-		return false // process not found or ps failed
-	}
-
-	actual := strings.TrimSpace(string(out))
-	if actual == "" {
 		return false
 	}
 
-	// Extract the binary name from the command (first word), then compare base names.
-	// e.g. "sleep 10" → "sleep", "/usr/bin/python script.py" → "python"
+	// Extract the binary name from the expected command (first word), then
+	// compare base names. e.g. "sleep 10" → "sleep", "/usr/bin/python" → "python"
 	parts := strings.Fields(expectedCommand)
 	if len(parts) == 0 {
 		return true
 	}
-	expectedBin := filepath.Base(parts[0])
 
-	actualBase := actual
-	if idx := strings.LastIndex(actual, "/"); idx >= 0 {
-		actualBase = actual[idx+1:]
+	return actual == filepath.Base(parts[0])
+}
+
+// processName returns the executable name for a given PID using sysctl,
+// avoiding the need to fork a process and parse CLI output.
+func processName(pid int) (string, error) {
+	kp, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil {
+		return "", fmt.Errorf("sysctl kern.proc.pid.%d: %w", pid, err)
 	}
 
-	return actualBase == expectedBin
+	// P_comm is a null-terminated [17]byte — find the end of the string.
+	name := unix.ByteSliceToString(kp.Proc.P_comm[:])
+	if name == "" {
+		return "", fmt.Errorf("empty process name for pid %d", pid)
+	}
+	return name, nil
 }

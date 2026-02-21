@@ -101,6 +101,46 @@ func TestAdoptedDriverStartIsNoop(t *testing.T) {
 	}
 }
 
+func TestVerifyProcessMatchesSelf(t *testing.T) {
+	// The test binary is a Go executable — verify we can match it
+	pid := os.Getpid()
+
+	// Should match when expectedCommand is empty (best effort)
+	if !VerifyProcess(pid, "") {
+		t.Error("expected match with empty command")
+	}
+
+	// Should not match a completely wrong binary name
+	if VerifyProcess(pid, "definitely-not-this-binary") {
+		t.Error("expected no match for wrong binary")
+	}
+
+	// Should fail for a dead PID
+	if VerifyProcess(99999999, "sleep") {
+		t.Error("expected no match for dead PID")
+	}
+}
+
+func TestVerifyProcessMatchesSleep(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting process: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	pid := cmd.Process.Pid
+
+	if !VerifyProcess(pid, "sleep 30") {
+		t.Error("expected match for 'sleep 30'")
+	}
+	if !VerifyProcess(pid, "/bin/sleep") {
+		t.Error("expected match for '/bin/sleep' (base name comparison)")
+	}
+	if VerifyProcess(pid, "bash") {
+		t.Error("expected no match for 'bash'")
+	}
+}
+
 func TestAdoptedDriverUsesCurrentPID(t *testing.T) {
 	// Our own process should be adoptable
 	drv, err := NewAdopted(os.Getpid())
