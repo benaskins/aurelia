@@ -81,11 +81,15 @@ var statusCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "SERVICE\tTYPE\tSTATE\tHEALTH\tPID\tUPTIME\tRESTARTS")
+		fmt.Fprintln(w, "SERVICE\tTYPE\tSTATE\tHEALTH\tPID\tPORT\tUPTIME\tRESTARTS")
 		for _, s := range states {
 			pid := "-"
 			if s.PID > 0 {
 				pid = fmt.Sprintf("%d", s.PID)
+			}
+			port := "-"
+			if s.Port > 0 {
+				port = fmt.Sprintf("%d", s.Port)
 			}
 			uptime := "-"
 			if s.Uptime != "" {
@@ -95,8 +99,8 @@ var statusCmd = &cobra.Command{
 			if health == "" {
 				health = "-"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
-				s.Name, s.Type, s.State, health, pid, uptime, s.RestartCount)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+				s.Name, s.Type, s.State, health, pid, port, uptime, s.RestartCount)
 		}
 		w.Flush()
 

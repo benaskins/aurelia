@@ -545,9 +545,11 @@ func (ms *ManagedService) buildEnv() []string {
 		env = os.Environ()
 	}
 
-	// Inject dynamically allocated port as PORT env var
+	// Inject port as PORT env var (dynamic or static)
 	if ms.allocatedPort != 0 {
 		env = append(env, fmt.Sprintf("PORT=%d", ms.allocatedPort))
+	} else if ms.spec.Network != nil && ms.spec.Network.Port != 0 {
+		env = append(env, fmt.Sprintf("PORT=%d", ms.spec.Network.Port))
 	}
 
 	for k, v := range ms.spec.Env {

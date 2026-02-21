@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/benaskins/aurelia/internal/api"
+	"github.com/benaskins/aurelia/internal/audit"
 	"github.com/benaskins/aurelia/internal/config"
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/gpu"
@@ -77,9 +78,17 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
-	// Create and start daemon with Keychain secret store
-	secrets := keychain.NewSystemStore()
+	// Create and start daemon with audited Keychain secret store
 	stateDir := filepath.Dir(specDir)
+	auditLog, err := audit.NewLogger(filepath.Join(stateDir, "audit.log"))
+	if err != nil {
+		return fmt.Errorf("creating audit log: %w", err)
+	}
+	meta, err := keychain.NewMetadataStore(filepath.Join(stateDir, "secret-metadata.json"))
+	if err != nil {
+		return fmt.Errorf("creating metadata store: %w", err)
+	}
+	secrets := keychain.NewAuditedStore(keychain.NewSystemStore(), auditLog, meta, "daemon")
 	opts := []daemon.Option{daemon.WithSecrets(secrets), daemon.WithStateDir(stateDir)}
 	if routingOutput != "" {
 		opts = append(opts, daemon.WithRouting(routingOutput))
