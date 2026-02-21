@@ -130,6 +130,22 @@ _ = syscall.Kill(-pid, syscall.SIGTERM) // Process group may already be exited
 
 **Test impact:** None — comments only.
 
+## Discovered issues
+
+### Container restart race (pre-existing bug)
+
+When the daemon restarts, `ContainerDriver.Start` force-removes the old container before creating a new one. The `ContainerWait` call in `waitForExit` then receives exit code 137 (SIGKILL) from the removed container, even though the new container is running fine. The daemon marks the service as failed despite the container being healthy.
+
+**Symptoms:** After daemon restart, all container services show `failed` with `exit 137`, but `docker ps` shows them running. A manual `aurelia restart <service>` fixes each one.
+
+**Root cause:** `ContainerWait` with `WaitConditionNotRunning` may receive the exit event from the force-removed container rather than tracking the newly created one. Likely a race between the remove completing and the wait being registered.
+
+**Fix:** Either wait for the force-remove to complete before creating the new container, or register `ContainerWait` after confirming the new container is running. Needs investigation.
+
+### Keychain ACL on binary replacement
+
+Replacing the aurelia binary with `cp` creates a new inode, which loses the macOS Keychain ACL. Services that depend on Keychain secrets fail with exit 1 after deploy. Must use `rm` + `mv` (or `install`) to preserve the binary identity. Should be documented or automated in the deploy process.
+
 ## Out of scope
 
 - **API design changes** — the REST API is clean and follows Go 1.22+ mux patterns
