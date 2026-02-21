@@ -177,3 +177,37 @@ func TestNativeWaitNotStarted(t *testing.T) {
 		t.Error("expected error waiting on unstarted process")
 	}
 }
+
+func TestNativeStopReturnsAfterSIGKILL(t *testing.T) {
+	// Verify that Stop() doesn't hang forever after SIGKILL.
+	// Uses a normal sleep process — the fix adds a hard timeout after SIGKILL
+	// so even zombie processes won't block Stop() indefinitely.
+	d := NewNative(NativeConfig{
+		Command: "sleep 60",
+	})
+
+	ctx := context.Background()
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("failed to start: %v", err)
+	}
+
+	// Stop with a very short SIGTERM timeout to force SIGKILL path
+	done := make(chan error, 1)
+	go func() {
+		done <- d.Stop(ctx, 1*time.Millisecond)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Stop() hung after SIGKILL — expected it to return within hard timeout")
+	}
+
+	info := d.Info()
+	if info.State != StateStopped && info.State != StateFailed {
+		t.Errorf("expected stopped or failed state, got %v", info.State)
+	}
+}

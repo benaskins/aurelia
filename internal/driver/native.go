@@ -138,6 +138,10 @@ func (d *NativeDriver) Stop(ctx context.Context, timeout time.Duration) error {
 	// Send SIGTERM to the process group (may already be exited)
 	_ = syscall.Kill(-pid, syscall.SIGTERM)
 
+	// Hard timeout after SIGKILL — if the process is in an uninterruptible
+	// state (zombie, D-state), give up waiting rather than blocking forever.
+	const killGrace = 5 * time.Second
+
 	// Wait for exit or timeout
 	select {
 	case <-d.done:
@@ -145,11 +149,25 @@ func (d *NativeDriver) Stop(ctx context.Context, timeout time.Duration) error {
 	case <-time.After(timeout):
 		// Force kill the process group (may already be exited)
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
-		<-d.done
+		select {
+		case <-d.done:
+		case <-time.After(killGrace):
+			d.mu.Lock()
+			d.state = StateFailed
+			d.exitErr = "process did not exit after SIGKILL"
+			d.mu.Unlock()
+		}
 		return nil
 	case <-ctx.Done():
 		_ = syscall.Kill(-pid, syscall.SIGKILL) // may already be exited
-		<-d.done
+		select {
+		case <-d.done:
+		case <-time.After(killGrace):
+			d.mu.Lock()
+			d.state = StateFailed
+			d.exitErr = "process did not exit after SIGKILL"
+			d.mu.Unlock()
+		}
 		return ctx.Err()
 	}
 }
