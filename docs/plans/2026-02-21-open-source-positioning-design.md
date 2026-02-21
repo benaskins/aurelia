@@ -175,6 +175,20 @@ Before open-sourcing, verify:
 - [ ] CI (GitHub Actions) for `go test ./...` and `go vet ./...`
 - [ ] No hardcoded paths or personal config in the repo
 
+## Future: Procfile Migration Path
+
+Procfile support was considered and rejected as a runtime format — it can't express dependencies, health checks, restart policies, secrets, or routing. Supporting it natively would either deliver a subset experience (undermining the value proposition) or require non-standard extensions (defeating the familiarity argument).
+
+Instead, offer a one-shot converter:
+
+```bash
+aurelia init --from Procfile
+```
+
+This reads a Procfile and generates one YAML spec per entry in `~/.aurelia/services/`. Each spec gets the command and a sensible name derived from the Procfile label. No health checks, no dependencies — just the minimal spec to get running. The user then edits the generated files to add what they need.
+
+This lowers the on-ramp for developers migrating from Overmind/Goreman without maintaining a second config format. One-time cost, leads users into the full spec format rather than away from it.
+
 ## Implementation Plan
 
 1. **Draft the new README** — restructure per this design, keeping existing reference content
