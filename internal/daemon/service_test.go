@@ -336,6 +336,49 @@ func TestManagedServiceExternalStartStop(t *testing.T) {
 	}
 }
 
+func TestManagedServiceStaticPortInjection(t *testing.T) {
+	s := &spec.ServiceSpec{
+		Service: spec.Service{
+			Name:    "test-static-port",
+			Type:    "native",
+			Command: "printenv PORT",
+		},
+		Network: &spec.Network{Port: 8080},
+		Restart: &spec.RestartPolicy{
+			Policy: "never",
+		},
+	}
+
+	ms, err := NewManagedService(s, nil)
+	if err != nil {
+		t.Fatalf("failed to create: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := ms.Start(ctx); err != nil {
+		t.Fatalf("failed to start: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+	ms.Stop(5 * time.Second)
+
+	if ms.drv == nil {
+		t.Fatal("expected driver to exist")
+	}
+
+	lines := ms.drv.LogLines(10)
+	found := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "8080" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected PORT=8080 in env, log output: %v", lines)
+	}
+}
+
 func TestManagedServiceSecretInjection(t *testing.T) {
 	secrets := keychain.NewMemoryStore()
 	secrets.Set("chat/database-url", "postgres://secret@localhost/db")

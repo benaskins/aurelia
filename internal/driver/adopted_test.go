@@ -141,6 +141,17 @@ func TestVerifyProcessMatchesSleep(t *testing.T) {
 	}
 }
 
+func TestAdoptedDriverLogLinesReturnsNil(t *testing.T) {
+	drv, err := NewAdopted(os.Getpid())
+	if err != nil {
+		t.Fatalf("NewAdopted(self): %v", err)
+	}
+
+	if lines := drv.LogLines(10); lines != nil {
+		t.Errorf("expected nil log lines for adopted driver, got %v", lines)
+	}
+}
+
 func TestAdoptedDriverUsesCurrentPID(t *testing.T) {
 	// Our own process should be adoptable
 	drv, err := NewAdopted(os.Getpid())
