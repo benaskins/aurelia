@@ -590,7 +590,11 @@ func (d *Daemon) redeployAdopted() {
 	if wait == 0 {
 		wait = 10 * time.Second
 	}
-	time.Sleep(wait)
+	select {
+	case <-time.After(wait):
+	case <-d.ctx.Done():
+		return
+	}
 
 	for _, name := range d.adopted {
 		// Check context — daemon may be shutting down
