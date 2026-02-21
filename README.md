@@ -249,7 +249,6 @@ restart:
   delay: 1s
   backoff: exponential     # "fixed" or "exponential"
   max_delay: 30s
-  reset_after: 5m
 
 env:
   LOG_LEVEL: info
@@ -258,13 +257,12 @@ env:
 secrets:
   DATABASE_URL:
     keychain: myapp/db-url
-    rotate_every: 90d
-    rotate_command: ./scripts/rotate-db-url.sh
 
 # Container only
 volumes:
   /host/path: /container/path
 
+# Container only
 args:
   - --some-flag
 
