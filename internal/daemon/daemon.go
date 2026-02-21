@@ -27,17 +27,19 @@ const (
 
 // Daemon is the top-level process supervisor.
 type Daemon struct {
-	specDir  string
-	stateDir string
-	secrets  keychain.Store
-	routing  *routing.TraefikGenerator
-	ports    *port.Allocator
-	services map[string]*ManagedService
-	deps     *depGraph
-	state    *stateFile
-	mu       sync.RWMutex
-	logger   *slog.Logger
-	ctx      context.Context // daemon lifecycle context, set in Start()
+	specDir      string
+	stateDir     string
+	secrets      keychain.Store
+	routing      *routing.TraefikGenerator
+	ports        *port.Allocator
+	services     map[string]*ManagedService
+	deps         *depGraph
+	state        *stateFile
+	mu           sync.RWMutex
+	logger       *slog.Logger
+	ctx          context.Context // daemon lifecycle context, set in Start()
+	adopted      []string        // services adopted during crash recovery, pending redeploy
+	redeployWait time.Duration   // delay before redeploying adopted services (default 10s)
 }
 
 // NewDaemon creates a new daemon that manages services from the given spec directory.
@@ -143,6 +145,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 					if err := d.adoptService(ctx, s, adopted); err != nil {
 						d.logger.Error("failed to adopt service", "service", name, "error", err)
 					} else {
+						d.adopted = append(d.adopted, name)
 						continue
 					}
 				} else {
@@ -158,6 +161,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	// Generate initial routing config
 	d.regenerateRouting()
+
+	// Redeploy adopted services in the background to restore log capture
+	go d.redeployAdopted()
 
 	// Start file watcher for auto-reload
 	go func() {
@@ -568,4 +574,35 @@ func (d *Daemon) adoptService(ctx context.Context, s *spec.ServiceSpec, drv driv
 
 	d.logger.Info("adopted service", "service", s.Service.Name, "pid", drv.Info().PID)
 	return nil
+}
+
+// redeployAdopted replaces adopted processes with fully-managed ones to restore
+// log capture and full supervision. Routed services get zero-downtime blue-green
+// deploys; non-routed services fall back to restart (brief downtime).
+func (d *Daemon) redeployAdopted() {
+	if len(d.adopted) == 0 {
+		return
+	}
+	d.logger.Info("redeploying adopted services", "count", len(d.adopted))
+
+	// Wait for health checks to converge before redeploying
+	wait := d.redeployWait
+	if wait == 0 {
+		wait = 10 * time.Second
+	}
+	time.Sleep(wait)
+
+	for _, name := range d.adopted {
+		// Check context — daemon may be shutting down
+		if d.ctx.Err() != nil {
+			return
+		}
+		d.logger.Info("redeploying adopted service", "service", name)
+		if err := d.DeployService(name, DefaultStopTimeout); err != nil {
+			d.logger.Error("failed to redeploy adopted service", "service", name, "error", err)
+		} else {
+			d.logger.Info("adopted service redeployed", "service", name)
+		}
+	}
+	d.adopted = nil
 }

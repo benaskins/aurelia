@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -497,6 +498,145 @@ dependencies:
 	states := d.ServiceStates()
 	if len(states) != 2 {
 		t.Fatalf("expected 2 services, got %d", len(states))
+	}
+}
+
+func TestRedeployAdoptedServices(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := t.TempDir()
+
+	writeSpec(t, dir, "sleeper.yaml", `
+service:
+  name: sleeper
+  type: native
+  command: "sleep 300"
+`)
+
+	// Start a standalone sleep process to simulate a process surviving a daemon crash.
+	// We can't use daemon1 because exec.CommandContext kills the child on cancel.
+	cmd := exec.Command("sleep", "300")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting sleep process: %v", err)
+	}
+	adoptedPID := cmd.Process.Pid
+	// Reap the process in a goroutine so it doesn't become a zombie after SIGTERM.
+	// kill(pid, 0) returns success for zombies, which would make the adopted
+	// driver's poll loop never detect death.
+	go cmd.Wait()
+	t.Cleanup(func() { cmd.Process.Kill() })
+
+	// Write state file as if a previous daemon was managing this process
+	sf := newStateFile(stateDir)
+	if err := sf.set("sleeper", ServiceRecord{
+		Type:    "native",
+		PID:     adoptedPID,
+		Command: "sleep 300",
+	}); err != nil {
+		t.Fatalf("writing state: %v", err)
+	}
+
+	// Start daemon — it should adopt the running process, then redeploy it
+	d := NewDaemon(dir, WithStateDir(stateDir))
+	d.redeployWait = 1 * time.Millisecond // skip the normal 10s delay
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+
+	// Verify the service was adopted
+	if len(d.adopted) == 0 {
+		t.Fatal("expected service to be in adopted list")
+	}
+	if d.adopted[0] != "sleeper" {
+		t.Fatalf("expected adopted=[sleeper], got %v", d.adopted)
+	}
+
+	// Wait for redeploy to complete (redeployWait=1ms + stop/start cycle)
+	time.Sleep(3 * time.Second)
+
+	state, err := d.ServiceState("sleeper")
+	if err != nil {
+		t.Fatalf("ServiceState after redeploy: %v", err)
+	}
+
+	// After redeploy, PID should have changed (new process started)
+	if state.PID == adoptedPID {
+		t.Errorf("expected PID to change after redeploy, still %d", adoptedPID)
+	}
+	if state.State != "running" {
+		t.Errorf("expected running after redeploy, got %v", state.State)
+	}
+
+	// Log capture should work now (NativeDriver, not AdoptedDriver)
+	d.mu.RLock()
+	ms := d.services["sleeper"]
+	d.mu.RUnlock()
+	logs := ms.Logs(10)
+	// sleep produces no output, but LogLines should return empty slice, not nil
+	// (NativeDriver returns []string{} from logbuf, AdoptedDriver returns nil)
+	if logs == nil {
+		t.Error("expected log capture to be restored (non-nil LogLines), got nil")
+	}
+}
+
+func TestRedeployAdoptedSkipsExternal(t *testing.T) {
+	dir := t.TempDir()
+	writeSpec(t, dir, "ext.yaml", `
+service:
+  name: ext-svc
+  type: external
+
+health:
+  type: tcp
+  port: 19997
+  interval: 1s
+  timeout: 500ms
+`)
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+
+	// External services are never adopted (adoption only triggers for native PIDs)
+	if len(d.adopted) != 0 {
+		t.Errorf("expected no adopted services for external type, got %v", d.adopted)
+	}
+}
+
+func TestRedeployAdoptedDaemonShutdown(t *testing.T) {
+	// Verify that redeployAdopted exits early when daemon context is cancelled
+	dir := t.TempDir()
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	d.ctx = ctx
+
+	// Populate adopted list with a name that doesn't exist in services —
+	// if the loop runs, DeployService will fail. That's fine, we just check it doesn't hang.
+	d.adopted = []string{"nonexistent"}
+	d.redeployWait = 1 * time.Millisecond
+
+	// Cancel context before redeploy runs
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		d.redeployAdopted()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success — exited promptly
+	case <-time.After(2 * time.Second):
+		t.Fatal("redeployAdopted did not exit after context cancellation")
 	}
 }
 
