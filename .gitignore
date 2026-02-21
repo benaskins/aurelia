@@ -15,3 +15,4 @@ bin/
 # Test artifacts
 *.tmp
 *.log
+coverage.out
