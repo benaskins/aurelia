@@ -9,6 +9,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/benaskins/aurelia/internal/logbuf"
 )
@@ -229,24 +230,9 @@ func (d *ContainerDriver) streamLogs(ctx context.Context) {
 	}
 	defer reader.Close()
 
-	// Docker log stream has a multiplexed header (8 bytes per frame).
-	// Use stdcopy.StdCopy to demux, or just strip headers.
-	// For simplicity, copy raw — the 8-byte headers are noise but logs
-	// are still readable. A proper implementation would use stdcopy.
-	buf := make([]byte, 4096)
-	for {
-		n, err := reader.Read(buf)
-		if n > 0 {
-			// Docker multiplexed stream: first 8 bytes are header per frame
-			// Header: [stream_type(1), 0, 0, 0, size(4)]
-			// For host networking, logs may come without multiplexing.
-			// Write raw to ring buffer — good enough for now.
-			d.buf.Write(buf[:n])
-		}
-		if err != nil {
-			return
-		}
-	}
+	// Docker multiplexes stdout/stderr with 8-byte frame headers.
+	// StdCopy strips those headers, writing clean output to the ring buffer.
+	stdcopy.StdCopy(d.buf, d.buf, reader)
 }
 
 func (d *ContainerDriver) waitForExit() {
