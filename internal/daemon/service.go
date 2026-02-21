@@ -216,6 +216,17 @@ func (ms *ManagedService) State() ServiceState {
 	return st
 }
 
+// supervisionPhase represents a phase in the service supervision lifecycle.
+type supervisionPhase int
+
+const (
+	phaseStarting   supervisionPhase = iota // Create driver and start the process
+	phaseRunning                            // Wait for process exit or health failure
+	phaseEvaluating                         // Decide whether to restart based on exit code and policy
+	phaseRestarting                         // Wait for restart delay, then loop back to starting
+	phaseStopped                            // Terminal — supervision is done
+)
+
 func (ms *ManagedService) supervise(ctx context.Context) {
 	defer func() {
 		ms.mu.Lock()
@@ -224,125 +235,24 @@ func (ms *ManagedService) supervise(ctx context.Context) {
 		ms.mu.Unlock()
 	}()
 
-	for {
-		// On first iteration, use adopted driver if recovering a running process
-		var drv driver.Driver
-		ms.mu.Lock()
-		if ms.adoptedDrv != nil {
-			drv = ms.adoptedDrv
-			ms.adoptedDrv = nil
-			ms.mu.Unlock()
-			ms.logger.Info("adopted running process", "pid", drv.Info().PID)
-		} else {
-			ms.mu.Unlock()
-			drv = ms.createDriver()
-		}
+	phase := phaseStarting
+	var drv driver.Driver
 
-		ms.mu.Lock()
-		ms.drv = drv
-		ms.mu.Unlock()
-
-		ms.logger.Info("starting process")
-		if err := drv.Start(ctx); err != nil {
-			ms.logger.Error("failed to start", "error", err)
-
-			if ctx.Err() != nil {
-				return
-			}
-
-			if !ms.shouldRestart() {
-				ms.logger.Info("restart policy exhausted, giving up")
-				return
-			}
-
-			delay := ms.restartDelay()
-			ms.logger.Info("restarting after delay", "delay", delay)
-			select {
-			case <-time.After(delay):
-				continue
-			case <-ctx.Done():
-				return
-			}
-		}
-
-		// Notify daemon of PID for state persistence
-		if ms.onStarted != nil {
-			ms.onStarted(drv.Info().PID)
-		}
-
-		// Start health monitoring if configured
-		monitor := ms.startHealthMonitor(ctx)
-		ms.mu.Lock()
-		ms.monitor = monitor
-		ms.mu.Unlock()
-
-		// Wait for process to exit OR health check to trigger restart
-		select {
-		case <-ms.waitForExit(drv):
-			// Process exited on its own
-			if monitor != nil {
-				monitor.Stop()
-			}
-		case <-ms.unhealthyCh:
-			// Health check triggered restart
-			ms.logger.Warn("restarting due to health check failure")
-			if monitor != nil {
-				monitor.Stop()
-			}
-			drv.Stop(ctx, 30*time.Second)
-			// Drain the done channel
-			drv.Wait()
-		}
-
-		exitCode := drv.Info().ExitCode
-
-		if ctx.Err() != nil {
-			return
-		}
-
-		ms.logger.Info("process exited", "exit_code", exitCode)
-
-		// Check restart policy
-		if !ms.shouldRestart() {
-			ms.logger.Info("restart policy exhausted, giving up")
-			return
-		}
-
-		policy := "on-failure"
-		if ms.spec.Restart != nil {
-			policy = ms.spec.Restart.Policy
-		}
-
-		switch policy {
-		case "never":
-			ms.logger.Info("restart policy is 'never', stopping")
-			return
-		case "on-failure":
-			if exitCode == 0 {
-				ms.logger.Info("process exited cleanly, not restarting (policy: on-failure)")
-				return
-			}
-		case "always":
-			// Always restart
-		}
-
-		ms.mu.Lock()
-		ms.restartCount++
-		ms.mu.Unlock()
-
-		delay := ms.restartDelay()
-		ms.logger.Info("restarting after delay", "delay", delay, "restart_count", ms.restartCount)
-
-		select {
-		case <-time.After(delay):
-			continue
-		case <-ctx.Done():
-			return
+	for phase != phaseStopped {
+		switch phase {
+		case phaseStarting:
+			drv, phase = ms.handleStarting(ctx)
+		case phaseRunning:
+			phase = ms.handleRunning(ctx, drv)
+		case phaseEvaluating:
+			phase = ms.handleEvaluating(ctx, drv)
+		case phaseRestarting:
+			phase = ms.handleRestarting(ctx)
 		}
 	}
 }
 
-// superviseExisting runs a supervision loop for an already-running process.
+// superviseExisting enters the supervision loop with an already-running process.
 // Used after blue-green deploy promotion to monitor the new instance.
 func (ms *ManagedService) superviseExisting(ctx context.Context, drv driver.Driver) {
 	defer func() {
@@ -352,42 +262,99 @@ func (ms *ManagedService) superviseExisting(ctx context.Context, drv driver.Driv
 		ms.mu.Unlock()
 	}()
 
-	// Wait for process to exit OR health check to trigger restart
+	phase := phaseRunning
+	for phase != phaseStopped {
+		switch phase {
+		case phaseRunning:
+			phase = ms.handleRunning(ctx, drv)
+		case phaseEvaluating:
+			phase = ms.handleEvaluating(ctx, drv)
+		case phaseRestarting:
+			phase = ms.handleRestarting(ctx)
+		case phaseStarting:
+			// After first restart, fall into the normal create-and-start path
+			drv, phase = ms.handleStarting(ctx)
+		}
+	}
+}
+
+// handleStarting creates (or adopts) a driver and starts the process.
+// Returns the driver and the next phase.
+func (ms *ManagedService) handleStarting(ctx context.Context) (driver.Driver, supervisionPhase) {
+	ms.mu.Lock()
+	if ms.adoptedDrv != nil {
+		drv := ms.adoptedDrv
+		ms.adoptedDrv = nil
+		ms.mu.Unlock()
+		ms.logger.Info("adopted running process", "pid", drv.Info().PID)
+
+		ms.mu.Lock()
+		ms.drv = drv
+		ms.mu.Unlock()
+		return drv, phaseRunning
+	}
+	ms.mu.Unlock()
+
+	drv := ms.createDriver()
+	ms.mu.Lock()
+	ms.drv = drv
+	ms.mu.Unlock()
+
+	ms.logger.Info("starting process")
+	if err := drv.Start(ctx); err != nil {
+		ms.logger.Error("failed to start", "error", err)
+
+		if ctx.Err() != nil {
+			return drv, phaseStopped
+		}
+		if !ms.shouldRestart() {
+			ms.logger.Info("restart policy exhausted, giving up")
+			return drv, phaseStopped
+		}
+		return drv, phaseRestarting
+	}
+
+	if ms.onStarted != nil {
+		ms.onStarted(drv.Info().PID)
+	}
+
+	monitor := ms.startHealthMonitor(ctx)
+	ms.mu.Lock()
+	ms.monitor = monitor
+	ms.mu.Unlock()
+
+	return drv, phaseRunning
+}
+
+// handleRunning waits for the process to exit or a health check to trigger restart.
+func (ms *ManagedService) handleRunning(ctx context.Context, drv driver.Driver) supervisionPhase {
 	select {
 	case <-ms.waitForExit(drv):
-		// Process exited
-		ms.mu.Lock()
-		monitor := ms.monitor
-		ms.mu.Unlock()
-		if monitor != nil {
-			monitor.Stop()
-		}
+		ms.stopMonitor()
 	case <-ms.unhealthyCh:
-		// Health check triggered restart
-		ms.logger.Warn("restarting due to health check failure (post-deploy)")
-		ms.mu.Lock()
-		monitor := ms.monitor
-		ms.mu.Unlock()
-		if monitor != nil {
-			monitor.Stop()
-		}
+		ms.logger.Warn("restarting due to health check failure")
+		ms.stopMonitor()
 		drv.Stop(ctx, 30*time.Second)
 		drv.Wait()
 	case <-ctx.Done():
-		return
+		return phaseStopped
 	}
+	return phaseEvaluating
+}
+
+// handleEvaluating checks the exit code and restart policy to decide the next phase.
+func (ms *ManagedService) handleEvaluating(ctx context.Context, drv driver.Driver) supervisionPhase {
+	exitCode := drv.Info().ExitCode
 
 	if ctx.Err() != nil {
-		return
+		return phaseStopped
 	}
 
-	exitCode := drv.Info().ExitCode
-	ms.logger.Info("process exited (post-deploy)", "exit_code", exitCode)
+	ms.logger.Info("process exited", "exit_code", exitCode)
 
-	// After the deployed process exits, fall into the normal restart loop
 	if !ms.shouldRestart() {
-		ms.logger.Info("restart policy exhausted, giving up (post-deploy)")
-		return
+		ms.logger.Info("restart policy exhausted, giving up")
+		return phaseStopped
 	}
 
 	policy := "on-failure"
@@ -397,10 +364,12 @@ func (ms *ManagedService) superviseExisting(ctx context.Context, drv driver.Driv
 
 	switch policy {
 	case "never":
-		return
+		ms.logger.Info("restart policy is 'never', stopping")
+		return phaseStopped
 	case "on-failure":
 		if exitCode == 0 {
-			return
+			ms.logger.Info("process exited cleanly, not restarting (policy: on-failure)")
+			return phaseStopped
 		}
 	case "always":
 		// Continue to restart
@@ -410,15 +379,29 @@ func (ms *ManagedService) superviseExisting(ctx context.Context, drv driver.Driv
 	ms.restartCount++
 	ms.mu.Unlock()
 
+	return phaseRestarting
+}
+
+// handleRestarting waits for the restart delay before transitioning back to starting.
+func (ms *ManagedService) handleRestarting(ctx context.Context) supervisionPhase {
 	delay := ms.restartDelay()
-	ms.logger.Info("restarting after delay (post-deploy)", "delay", delay)
+	ms.logger.Info("restarting after delay", "delay", delay, "restart_count", ms.restartCount)
 
 	select {
 	case <-time.After(delay):
-		// Fall into the normal supervision loop
-		ms.supervise(ctx)
+		return phaseStarting
 	case <-ctx.Done():
-		return
+		return phaseStopped
+	}
+}
+
+// stopMonitor stops the health monitor if one is running.
+func (ms *ManagedService) stopMonitor() {
+	ms.mu.Lock()
+	monitor := ms.monitor
+	ms.mu.Unlock()
+	if monitor != nil {
+		monitor.Stop()
 	}
 }
 
