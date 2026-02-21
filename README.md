@@ -45,6 +45,15 @@ Or without just:
 go build -o aurelia ./cmd/aurelia/
 ```
 
+For a leaner binary without container or GPU support:
+
+```bash
+just build-lean  # excludes Docker client and cgo GPU code
+# or: go build -tags nocontainer,nogpu -ldflags="-s -w" -o aurelia-lean ./cmd/aurelia/
+```
+
+Available build tags: `nocontainer` (excludes Docker client libraries), `nogpu` (excludes cgo Metal/IOKit GPU code). Default builds include everything.
+
 Optionally, start the daemon at login:
 
 ```bash
