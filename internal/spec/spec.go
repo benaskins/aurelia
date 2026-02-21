@@ -33,7 +33,7 @@ type ServiceSpec struct {
 
 type Service struct {
 	Name        string `yaml:"name"`
-	Type        string `yaml:"type"`                   // "native" | "container"
+	Type        string `yaml:"type"`                   // "native" | "container" | "external"
 	Command     string `yaml:"command,omitempty"`      // native only
 	WorkingDir  string `yaml:"working_dir,omitempty"`  // native only
 	Image       string `yaml:"image,omitempty"`        // container only
@@ -194,8 +194,21 @@ func (s *ServiceSpec) Validate() error {
 				return fmt.Errorf("service.network_mode contains invalid characters, got %q", nm)
 			}
 		}
+	case "external":
+		if s.Service.Command != "" {
+			return fmt.Errorf("service.command is not valid for external services")
+		}
+		if s.Service.Image != "" {
+			return fmt.Errorf("service.image is not valid for external services")
+		}
+		if s.Health == nil {
+			return fmt.Errorf("health block is required for external services")
+		}
+		if s.Routing != nil {
+			return fmt.Errorf("routing is not valid for external services")
+		}
 	default:
-		return fmt.Errorf("service.type must be \"native\" or \"container\", got %q", s.Service.Type)
+		return fmt.Errorf("service.type must be \"native\", \"container\", or \"external\", got %q", s.Service.Type)
 	}
 
 	if h := s.Health; h != nil {

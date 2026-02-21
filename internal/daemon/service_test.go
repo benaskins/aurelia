@@ -286,6 +286,56 @@ func TestManagedServiceRejectsUnknownType(t *testing.T) {
 	}
 }
 
+func TestManagedServiceExternalStartStop(t *testing.T) {
+	s := &spec.ServiceSpec{
+		Service: spec.Service{
+			Name: "test-external",
+			Type: "external",
+		},
+		Health: &spec.HealthCheck{
+			Type:               "tcp",
+			Port:               19877,
+			Interval:           spec.Duration{Duration: 50 * time.Millisecond},
+			Timeout:            spec.Duration{Duration: 100 * time.Millisecond},
+			UnhealthyThreshold: 2,
+		},
+	}
+
+	ms, err := NewManagedService(s, nil)
+	if err != nil {
+		t.Fatalf("failed to create: %v", err)
+	}
+
+	if !ms.IsExternal() {
+		t.Error("expected IsExternal() to return true")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := ms.Start(ctx); err != nil {
+		t.Fatalf("failed to start: %v", err)
+	}
+
+	// Give health checks time to run
+	time.Sleep(300 * time.Millisecond)
+
+	state := ms.State()
+	if state.State != driver.StateRunning {
+		t.Errorf("expected running, got %v", state.State)
+	}
+	if state.PID != 0 {
+		t.Errorf("expected no PID for external service, got %d", state.PID)
+	}
+	if state.Port != 19877 {
+		t.Errorf("expected port 19877, got %d", state.Port)
+	}
+
+	if err := ms.Stop(5 * time.Second); err != nil {
+		t.Fatalf("failed to stop: %v", err)
+	}
+}
+
 func TestManagedServiceSecretInjection(t *testing.T) {
 	secrets := keychain.NewMemoryStore()
 	secrets.Set("chat/database-url", "postgres://secret@localhost/db")

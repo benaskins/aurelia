@@ -411,6 +411,95 @@ routing:
 	}
 }
 
+func TestDaemonExternalServiceShowsHealth(t *testing.T) {
+	dir := t.TempDir()
+	writeSpec(t, dir, "ext.yaml", `
+service:
+  name: ext-svc
+  type: external
+
+health:
+  type: tcp
+  port: 19999
+  interval: 100ms
+  timeout: 50ms
+  unhealthy_threshold: 2
+`)
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+
+	// Wait for health checks to run
+	time.Sleep(500 * time.Millisecond)
+
+	state, err := d.ServiceState("ext-svc")
+	if err != nil {
+		t.Fatalf("ServiceState: %v", err)
+	}
+
+	if state.Type != "external" {
+		t.Errorf("expected type 'external', got %q", state.Type)
+	}
+	if state.State != "running" {
+		t.Errorf("expected state 'running' for external service, got %q", state.State)
+	}
+	// Nothing listening on 19999 so health should be unhealthy
+	if state.Health != "unhealthy" {
+		t.Errorf("expected health 'unhealthy', got %q", state.Health)
+	}
+	if state.PID != 0 {
+		t.Errorf("expected no PID for external service, got %d", state.PID)
+	}
+	if state.Port != 19999 {
+		t.Errorf("expected port 19999 from health check, got %d", state.Port)
+	}
+}
+
+func TestDaemonExternalServiceInDeps(t *testing.T) {
+	dir := t.TempDir()
+	writeSpec(t, dir, "ext.yaml", `
+service:
+  name: ext-dep
+  type: external
+
+health:
+  type: tcp
+  port: 19998
+  interval: 1s
+  timeout: 500ms
+`)
+	writeSpec(t, dir, "app.yaml", `
+service:
+  name: app
+  type: native
+  command: "sleep 10"
+
+dependencies:
+  after: [ext-dep]
+`)
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+
+	// Both should be registered
+	states := d.ServiceStates()
+	if len(states) != 2 {
+		t.Fatalf("expected 2 services, got %d", len(states))
+	}
+}
+
 func TestDaemonEmptyDir(t *testing.T) {
 	dir := t.TempDir()
 

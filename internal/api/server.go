@@ -160,8 +160,21 @@ func (s *Server) getService(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, state)
 }
 
+func (s *Server) isExternalGuard(w http.ResponseWriter, name, action string) bool {
+	if s.daemon.IsExternal(name) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("cannot %s external service %q", action, name),
+		})
+		return true
+	}
+	return false
+}
+
 func (s *Server) startService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+	if s.isExternalGuard(w, name, "start") {
+		return
+	}
 	if err := s.daemon.StartService(r.Context(), name); err != nil {
 		s.logger.Error("startService: failed to start service", "service", name, "error", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errorMessage("failed to start service", err, r)})
@@ -172,6 +185,9 @@ func (s *Server) startService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) stopService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+	if s.isExternalGuard(w, name, "stop") {
+		return
+	}
 	if err := s.daemon.StopService(name, daemon.DefaultStopTimeout); err != nil {
 		s.logger.Error("stopService: failed to stop service", "service", name, "error", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errorMessage("failed to stop service", err, r)})
@@ -182,6 +198,9 @@ func (s *Server) stopService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+	if s.isExternalGuard(w, name, "restart") {
+		return
+	}
 	if err := s.daemon.RestartService(name, daemon.DefaultStopTimeout); err != nil {
 		s.logger.Error("restartService: failed to restart service", "service", name, "error", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errorMessage("failed to restart service", err, r)})
@@ -192,6 +211,9 @@ func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deployService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+	if s.isExternalGuard(w, name, "deploy") {
+		return
+	}
 	drain := daemon.DefaultDrainTimeout
 	if d := r.URL.Query().Get("drain"); d != "" {
 		if parsed, err := time.ParseDuration(d); err == nil && parsed > 0 {

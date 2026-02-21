@@ -226,6 +226,72 @@ service:
 	}
 }
 
+func TestExternalServiceAPIGuard(t *testing.T) {
+	_, client := setupTestServer(t, map[string]string{
+		"ext.yaml": `
+service:
+  name: ext-svc
+  type: external
+
+health:
+  type: tcp
+  port: 19876
+  interval: 1s
+  timeout: 500ms
+`,
+	})
+
+	// start should be rejected
+	resp, err := client.Post("http://aurelia/v1/services/ext-svc/start", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST start: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Errorf("expected 400 for start external, got %d", resp.StatusCode)
+	}
+
+	// stop should be rejected
+	resp, err = client.Post("http://aurelia/v1/services/ext-svc/stop", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST stop: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Errorf("expected 400 for stop external, got %d", resp.StatusCode)
+	}
+
+	// restart should be rejected
+	resp, err = client.Post("http://aurelia/v1/services/ext-svc/restart", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST restart: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Errorf("expected 400 for restart external, got %d", resp.StatusCode)
+	}
+
+	// deploy should be rejected
+	resp, err = client.Post("http://aurelia/v1/services/ext-svc/deploy", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST deploy: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Errorf("expected 400 for deploy external, got %d", resp.StatusCode)
+	}
+
+	// GET (status) should still work
+	resp, err = client.Get("http://aurelia/v1/services/ext-svc")
+	if err != nil {
+		t.Fatalf("GET service: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200 for GET external, got %d", resp.StatusCode)
+	}
+}
+
 func TestTCPAuthRequired(t *testing.T) {
 	d := daemon.NewDaemon(t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())

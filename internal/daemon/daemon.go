@@ -226,6 +226,14 @@ func (d *Daemon) Stop(timeout time.Duration) {
 	}
 }
 
+// IsExternal returns true if the named service is an external (unmanaged) service.
+func (d *Daemon) IsExternal(name string) bool {
+	d.mu.RLock()
+	ms, ok := d.services[name]
+	d.mu.RUnlock()
+	return ok && ms.IsExternal()
+}
+
 // StartService starts a single service by name.
 func (d *Daemon) StartService(ctx context.Context, name string) error {
 	d.mu.RLock()
@@ -425,28 +433,31 @@ func (d *Daemon) startServiceLocked(ctx context.Context, s *spec.ServiceSpec) er
 
 	name := s.Service.Name
 
-	// Allocate a dynamic port if the spec requests one
-	if s.NeedsDynamicPort() {
-		p, err := d.ports.Allocate(name)
-		if err != nil {
-			return fmt.Errorf("allocating port for %s: %w", name, err)
+	// External services skip port allocation and state persistence
+	if s.Service.Type != "external" {
+		// Allocate a dynamic port if the spec requests one
+		if s.NeedsDynamicPort() {
+			p, err := d.ports.Allocate(name)
+			if err != nil {
+				return fmt.Errorf("allocating port for %s: %w", name, err)
+			}
+			ms.allocatedPort = p
+			d.logger.Info("allocated dynamic port", "service", name, "port", p)
 		}
-		ms.allocatedPort = p
-		d.logger.Info("allocated dynamic port", "service", name, "port", p)
-	}
 
-	ms.onStarted = func(pid int) {
-		rec := ServiceRecord{
-			Type:      s.Service.Type,
-			PID:       pid,
-			Port:      ms.allocatedPort,
-			StartedAt: time.Now().Unix(),
-			Command:   s.Service.Command,
+		ms.onStarted = func(pid int) {
+			rec := ServiceRecord{
+				Type:      s.Service.Type,
+				PID:       pid,
+				Port:      ms.allocatedPort,
+				StartedAt: time.Now().Unix(),
+				Command:   s.Service.Command,
+			}
+			if err := d.state.set(name, rec); err != nil {
+				d.logger.Warn("failed to save service state", "service", name, "error", err)
+			}
+			d.regenerateRouting()
 		}
-		if err := d.state.set(name, rec); err != nil {
-			d.logger.Warn("failed to save service state", "service", name, "error", err)
-		}
-		d.regenerateRouting()
 	}
 
 	if err := ms.Start(ctx); err != nil {

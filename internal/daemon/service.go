@@ -57,10 +57,10 @@ type ManagedService struct {
 // The secrets store is optional — if nil, secret refs in the spec are skipped.
 func NewManagedService(s *spec.ServiceSpec, secrets keychain.Store) (*ManagedService, error) {
 	switch s.Service.Type {
-	case "native", "container":
+	case "native", "container", "external":
 		// supported
 	default:
-		return nil, fmt.Errorf("unsupported service type %q (expected native or container)", s.Service.Type)
+		return nil, fmt.Errorf("unsupported service type %q (expected native, container, or external)", s.Service.Type)
 	}
 
 	return &ManagedService{
@@ -69,6 +69,11 @@ func NewManagedService(s *spec.ServiceSpec, secrets keychain.Store) (*ManagedSer
 		logger:      slog.With("service", s.Service.Name),
 		unhealthyCh: make(chan struct{}, 1),
 	}, nil
+}
+
+// IsExternal returns true for external (unmanaged) services.
+func (ms *ManagedService) IsExternal() bool {
+	return ms.spec.Service.Type == "external"
 }
 
 // EffectivePort returns the dynamically allocated port if set,
@@ -84,6 +89,7 @@ func (ms *ManagedService) EffectivePort() int {
 }
 
 // Start begins running the service with restart supervision.
+// For external services, it starts health monitoring only (no process supervision).
 func (ms *ManagedService) Start(ctx context.Context) error {
 	ms.mu.Lock()
 	if ms.cancel != nil {
@@ -94,6 +100,24 @@ func (ms *ManagedService) Start(ctx context.Context) error {
 	svcCtx, cancel := context.WithCancel(ctx)
 	ms.cancel = cancel
 	ms.stopped = make(chan struct{})
+
+	if ms.IsExternal() {
+		monitor := ms.startHealthMonitor(svcCtx)
+		ms.monitor = monitor
+		ms.mu.Unlock()
+		go func() {
+			<-svcCtx.Done()
+			if monitor != nil {
+				monitor.Stop()
+			}
+			ms.mu.Lock()
+			ms.cancel = nil
+			close(ms.stopped)
+			ms.mu.Unlock()
+		}()
+		return nil
+	}
+
 	ms.mu.Unlock()
 
 	go ms.supervise(svcCtx)
@@ -101,6 +125,7 @@ func (ms *ManagedService) Start(ctx context.Context) error {
 }
 
 // Stop gracefully stops the service and its supervision loop.
+// For external services, it stops health monitoring only.
 func (ms *ManagedService) Stop(timeout time.Duration) error {
 	ms.mu.Lock()
 	cancel := ms.cancel
@@ -118,7 +143,7 @@ func (ms *ManagedService) Stop(timeout time.Duration) error {
 		monitor.Stop()
 	}
 
-	// Stop the driver (graceful SIGTERM → SIGKILL)
+	// Stop the driver (graceful SIGTERM → SIGKILL) — skip for external
 	if drv != nil {
 		if err := drv.Stop(context.Background(), timeout); err != nil {
 			ms.logger.Warn("error stopping service", "error", err)
@@ -150,6 +175,7 @@ func (ms *ManagedService) Logs(n int) []string {
 }
 
 // State returns the current service state.
+// For external services, state is always "running" — we observe health, not lifecycle.
 func (ms *ManagedService) State() ServiceState {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
@@ -164,6 +190,14 @@ func (ms *ManagedService) State() ServiceState {
 
 	if ms.monitor != nil {
 		st.Health = ms.monitor.CurrentStatus()
+	}
+
+	if ms.IsExternal() {
+		st.State = driver.StateRunning
+		if ms.spec.Health != nil {
+			st.Port = ms.spec.Health.Port
+		}
+		return st
 	}
 
 	if ms.drv != nil {

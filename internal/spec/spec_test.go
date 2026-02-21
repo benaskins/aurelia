@@ -680,6 +680,85 @@ health:
 	}
 }
 
+func TestValidateExternalServiceValid(t *testing.T) {
+	t.Parallel()
+	s := &ServiceSpec{
+		Service: Service{Name: "ollama", Type: "external"},
+		Health: &HealthCheck{
+			Type:     "http",
+			Path:     "/",
+			Port:     11434,
+			Interval: Duration{15 * time.Second},
+			Timeout:  Duration{3 * time.Second},
+		},
+	}
+	if err := s.Validate(); err != nil {
+		t.Errorf("expected valid external spec, got: %v", err)
+	}
+}
+
+func TestValidateExternalServiceRequiresHealth(t *testing.T) {
+	t.Parallel()
+	s := &ServiceSpec{
+		Service: Service{Name: "ext", Type: "external"},
+	}
+	if err := s.Validate(); err == nil {
+		t.Error("expected error for external service without health block")
+	}
+}
+
+func TestValidateExternalServiceRejectsCommand(t *testing.T) {
+	t.Parallel()
+	s := &ServiceSpec{
+		Service: Service{Name: "ext", Type: "external", Command: "/bin/foo"},
+		Health: &HealthCheck{
+			Type:     "http",
+			Path:     "/",
+			Port:     8080,
+			Interval: Duration{10 * time.Second},
+			Timeout:  Duration{2 * time.Second},
+		},
+	}
+	if err := s.Validate(); err == nil {
+		t.Error("expected error for external service with command")
+	}
+}
+
+func TestValidateExternalServiceRejectsImage(t *testing.T) {
+	t.Parallel()
+	s := &ServiceSpec{
+		Service: Service{Name: "ext", Type: "external", Image: "nginx"},
+		Health: &HealthCheck{
+			Type:     "http",
+			Path:     "/",
+			Port:     8080,
+			Interval: Duration{10 * time.Second},
+			Timeout:  Duration{2 * time.Second},
+		},
+	}
+	if err := s.Validate(); err == nil {
+		t.Error("expected error for external service with image")
+	}
+}
+
+func TestValidateExternalServiceRejectsRouting(t *testing.T) {
+	t.Parallel()
+	s := &ServiceSpec{
+		Service: Service{Name: "ext", Type: "external"},
+		Health: &HealthCheck{
+			Type:     "http",
+			Path:     "/",
+			Port:     8080,
+			Interval: Duration{10 * time.Second},
+			Timeout:  Duration{2 * time.Second},
+		},
+		Routing: &Routing{Hostname: "ext.example.local"},
+	}
+	if err := s.Validate(); err == nil {
+		t.Error("expected error for external service with routing")
+	}
+}
+
 func TestSecretRefWithRotation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

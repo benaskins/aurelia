@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"testing"
+	"time"
 
 	"github.com/benaskins/aurelia/internal/spec"
 )
@@ -156,6 +157,37 @@ func TestCascadeStopNoRequires(t *testing.T) {
 	targets := g.cascadeStopTargets("a")
 	if len(targets) != 0 {
 		t.Errorf("expected no cascade targets, got %v", targets)
+	}
+}
+
+func TestExternalServiceInDependencyOrder(t *testing.T) {
+	// External service participates in dep ordering like any other
+	ext := &spec.ServiceSpec{
+		Service: spec.Service{Name: "ollama", Type: "external"},
+		Health: &spec.HealthCheck{
+			Type:     "http",
+			Path:     "/",
+			Port:     11434,
+			Interval: spec.Duration{Duration: 15 * time.Second},
+			Timeout:  spec.Duration{Duration: 3 * time.Second},
+		},
+	}
+	app := makeSpec("chat", []string{"ollama"}, nil)
+
+	g := newDepGraph([]*spec.ServiceSpec{ext, app})
+
+	order, err := g.startOrder()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	idx := make(map[string]int)
+	for i, name := range order {
+		idx[name] = i
+	}
+
+	if idx["ollama"] >= idx["chat"] {
+		t.Errorf("expected ollama before chat, got ollama=%d chat=%d", idx["ollama"], idx["chat"])
 	}
 }
 
