@@ -122,7 +122,6 @@ restart:
   delay: 15s
   backoff: exponential
   max_delay: 5m
-  reset_after: 10m
 
 routing:
   hostname: chat.example.local
@@ -759,7 +758,7 @@ func TestValidateExternalServiceRejectsRouting(t *testing.T) {
 	}
 }
 
-func TestSecretRefWithRotation(t *testing.T) {
+func TestSecretRef(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.yaml")
@@ -772,8 +771,6 @@ service:
 secrets:
   API_KEY:
     keychain: aurelia/test/api-key
-    rotate_every: 30d
-    rotate_command: scripts/rotate.sh
 `
 	os.WriteFile(path, []byte(data), 0644)
 
@@ -786,10 +783,26 @@ secrets:
 	if secret.Keychain != "aurelia/test/api-key" {
 		t.Errorf("expected keychain ref, got %q", secret.Keychain)
 	}
-	if secret.RotateEvery != "30d" {
-		t.Errorf("expected rotate_every '30d', got %q", secret.RotateEvery)
+}
+
+func TestValidateNativeServiceRejectsArgs(t *testing.T) {
+	t.Parallel()
+	spec := &ServiceSpec{
+		Service: Service{Name: "test", Type: "native", Command: "echo"},
+		Args:    []string{"--flag"},
 	}
-	if secret.RotateCommand != "scripts/rotate.sh" {
-		t.Errorf("expected rotate_command, got %q", secret.RotateCommand)
+	if err := spec.Validate(); err == nil {
+		t.Error("expected validation error for args on native service")
+	}
+}
+
+func TestValidateContainerServiceAllowsArgs(t *testing.T) {
+	t.Parallel()
+	spec := &ServiceSpec{
+		Service: Service{Name: "test", Type: "container", Image: "nginx:latest"},
+		Args:    []string{"--flag"},
+	}
+	if err := spec.Validate(); err != nil {
+		t.Errorf("expected container args to be valid, got: %v", err)
 	}
 }

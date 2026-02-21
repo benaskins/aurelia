@@ -61,13 +61,10 @@ type RestartPolicy struct {
 	Delay       Duration `yaml:"delay,omitempty"`
 	Backoff     string   `yaml:"backoff,omitempty"` // "fixed" | "exponential"
 	MaxDelay    Duration `yaml:"max_delay,omitempty"`
-	ResetAfter  Duration `yaml:"reset_after,omitempty"`
 }
 
 type SecretRef struct {
-	Keychain      string `yaml:"keychain"`
-	RotateEvery   string `yaml:"rotate_every,omitempty"`
-	RotateCommand string `yaml:"rotate_command,omitempty"`
+	Keychain string `yaml:"keychain"`
 }
 
 type Routing struct {
@@ -181,6 +178,9 @@ func (s *ServiceSpec) Validate() error {
 		}
 		if s.Service.Image != "" {
 			return fmt.Errorf("service.image is not valid for native services")
+		}
+		if len(s.Args) > 0 {
+			return fmt.Errorf("args is not valid for native services (command arguments are part of service.command)")
 		}
 	case "container":
 		if s.Service.Image == "" {
