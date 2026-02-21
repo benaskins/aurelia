@@ -142,21 +142,19 @@ dependencies:
 
 `aurelia up` starts postgres first, waits for its health check to pass, then starts the API (on a dynamically allocated port), then the worker. If postgres stops, the API and worker cascade-stop automatically.
 
-## Comparison
+## How It Fits In
 
-| | Aurelia | Overmind | Goreman | process-compose | docker-compose |
-|---|---|---|---|---|---|
-| Native processes | yes | yes | yes | yes | no |
-| Containers | yes | no | no | no | yes |
-| Dependency ordering | yes | no | no | yes | yes |
-| Health checks | yes | no | no | yes | yes |
-| Restart policies | yes | no | no | yes | yes |
-| Live reload | yes | no | no | yes | no |
-| Crash recovery | yes | no | no | no | yes |
-| Zero-downtime deploy | yes | no | no | no | no |
-| macOS Keychain secrets | yes | no | no | no | no |
-| Config format | YAML | Procfile | Procfile | YAML | YAML |
-| Platform | macOS | Linux/macOS | Linux/macOS | cross-platform | cross-platform |
+These are all **local development tools** — none are substitutes for production infrastructure. If you need something simple and cross-platform, goreman or overmind will get you there faster. Aurelia exists for the case where you want dependency ordering, health checks, and routing on a macOS dev machine without reaching for docker-compose.
+
+| | Aurelia | process-compose | Overmind / Goreman | docker-compose |
+|---|---|---|---|---|
+| Sweet spot | macOS, mixed native + container stacks | Cross-platform process orchestration | Simple Procfile runner | All-container stacks |
+| Native processes | yes | yes | yes | no |
+| Containers | yes | no | no | yes |
+| Dependency ordering | yes | yes | no | yes |
+| Health checks | yes | yes | no | yes |
+| Platform | macOS only | cross-platform | Linux/macOS | cross-platform |
+| Maturity | early, single developer | active community | stable, mature | industry standard |
 
 ## Design Approach
 
