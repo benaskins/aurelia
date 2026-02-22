@@ -555,7 +555,10 @@ service:
 	}
 
 	// Wait for redeploy to complete (redeployWait=1ms + stop/start cycle)
-	time.Sleep(3 * time.Second)
+	waitUntil(t, func() bool {
+		s, _ := d.ServiceState("sleeper")
+		return s.PID != adoptedPID && s.PID != 0
+	}, 5*time.Second, "PID to change after redeploy")
 
 	state, err := d.ServiceState("sleeper")
 	if err != nil {

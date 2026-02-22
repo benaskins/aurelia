@@ -11,6 +11,19 @@ import (
 	"github.com/benaskins/aurelia/internal/spec"
 )
 
+// waitUntil polls condition every 10ms until it returns true or timeout is reached.
+func waitUntil(t *testing.T, condition func() bool, timeout time.Duration, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting: %s", msg)
+}
+
 func TestManagedServiceStartStop(t *testing.T) {
 	s := &spec.ServiceSpec{
 		Service: spec.Service{
@@ -33,13 +46,11 @@ func TestManagedServiceStartStop(t *testing.T) {
 		t.Fatalf("failed to start: %v", err)
 	}
 
-	// Give it a moment to actually start
-	time.Sleep(100 * time.Millisecond)
+	waitUntil(t, func() bool {
+		return ms.State().State == driver.StateRunning
+	}, 2*time.Second, "state to become running")
 
 	state := ms.State()
-	if state.State != driver.StateRunning {
-		t.Errorf("expected running, got %v", state.State)
-	}
 	if state.PID <= 0 {
 		t.Errorf("expected positive PID, got %d", state.PID)
 	}
@@ -64,7 +75,7 @@ func TestManagedServiceRestartOnFailure(t *testing.T) {
 		Restart: &spec.RestartPolicy{
 			Policy:      "on-failure",
 			MaxAttempts: 2,
-			Delay:       spec.Duration{Duration: 100 * time.Millisecond},
+			Delay:       spec.Duration{Duration: 10 * time.Millisecond},
 		},
 	}
 
@@ -78,13 +89,11 @@ func TestManagedServiceRestartOnFailure(t *testing.T) {
 		t.Fatalf("failed to start: %v", err)
 	}
 
-	// Wait for restarts to exhaust
-	time.Sleep(800 * time.Millisecond)
+	waitUntil(t, func() bool {
+		return ms.State().RestartCount >= 1
+	}, 2*time.Second, "at least 1 restart")
 
 	state := ms.State()
-	if state.RestartCount < 1 {
-		t.Errorf("expected at least 1 restart, got %d", state.RestartCount)
-	}
 	if state.RestartCount > 2 {
 		t.Errorf("expected at most 2 restarts, got %d", state.RestartCount)
 	}
@@ -100,7 +109,7 @@ func TestManagedServiceNoRestartOnCleanExit(t *testing.T) {
 		Restart: &spec.RestartPolicy{
 			Policy:      "on-failure",
 			MaxAttempts: 3,
-			Delay:       spec.Duration{Duration: 100 * time.Millisecond},
+			Delay:       spec.Duration{Duration: 10 * time.Millisecond},
 		},
 	}
 
@@ -114,8 +123,13 @@ func TestManagedServiceNoRestartOnCleanExit(t *testing.T) {
 		t.Fatalf("failed to start: %v", err)
 	}
 
-	// Wait a bit — should NOT restart
-	time.Sleep(500 * time.Millisecond)
+	// Wait for process to exit (it runs "true" which exits immediately)
+	waitUntil(t, func() bool {
+		return ms.State().State != driver.StateRunning
+	}, 2*time.Second, "process to exit")
+
+	// Give a small window to ensure no restarts fire
+	time.Sleep(50 * time.Millisecond)
 
 	state := ms.State()
 	if state.RestartCount != 0 {
@@ -133,7 +147,7 @@ func TestManagedServiceAlwaysRestart(t *testing.T) {
 		Restart: &spec.RestartPolicy{
 			Policy:      "always",
 			MaxAttempts: 2,
-			Delay:       spec.Duration{Duration: 100 * time.Millisecond},
+			Delay:       spec.Duration{Duration: 10 * time.Millisecond},
 		},
 	}
 
@@ -149,10 +163,15 @@ func TestManagedServiceAlwaysRestart(t *testing.T) {
 		t.Fatalf("failed to start: %v", err)
 	}
 
-	// Wait for restarts
-	time.Sleep(800 * time.Millisecond)
+	waitUntil(t, func() bool {
+		return ms.State().RestartCount >= 1
+	}, 2*time.Second, "at least 1 restart with 'always' policy")
+
 	cancel()
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, func() bool {
+		s := ms.State().State
+		return s == driver.StateStopped || s == driver.StateFailed
+	}, 2*time.Second, "service to stop after cancel")
 
 	state := ms.State()
 	if state.RestartCount < 1 {
@@ -181,7 +200,10 @@ func TestManagedServiceNeverRestart(t *testing.T) {
 		t.Fatalf("failed to start: %v", err)
 	}
 
-	time.Sleep(300 * time.Millisecond)
+	waitUntil(t, func() bool {
+		s := ms.State().State
+		return s == driver.StateFailed || s == driver.StateStopped
+	}, 2*time.Second, "process to exit")
 
 	state := ms.State()
 	if state.RestartCount != 0 {
@@ -190,6 +212,10 @@ func TestManagedServiceNeverRestart(t *testing.T) {
 }
 
 func TestManagedServiceExponentialBackoff(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: exercises real backoff timing")
+	}
+
 	s := &spec.ServiceSpec{
 		Service: spec.Service{
 			Name:    "test-backoff",
@@ -216,7 +242,7 @@ func TestManagedServiceExponentialBackoff(t *testing.T) {
 	}
 
 	// Wait for all restarts to exhaust
-	time.Sleep(2 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	elapsed := time.Since(start)
 	// With 50ms base, exponential: 50ms + 100ms + 200ms = 350ms minimum
@@ -260,16 +286,15 @@ func TestManagedServiceHealthState(t *testing.T) {
 		t.Fatalf("failed to start: %v", err)
 	}
 
-	// Wait for health checks to trigger unhealthy
-	time.Sleep(500 * time.Millisecond)
-
-	state := ms.State()
-	if state.Health != "unhealthy" {
-		t.Errorf("expected unhealthy, got %v", state.Health)
-	}
+	waitUntil(t, func() bool {
+		return ms.State().Health == "unhealthy"
+	}, 2*time.Second, "health to become unhealthy")
 
 	cancel()
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, func() bool {
+		s := ms.State().State
+		return s == driver.StateStopped || s == driver.StateFailed
+	}, 2*time.Second, "service to stop after cancel")
 }
 
 func TestManagedServiceRejectsUnknownType(t *testing.T) {
@@ -317,13 +342,11 @@ func TestManagedServiceExternalStartStop(t *testing.T) {
 		t.Fatalf("failed to start: %v", err)
 	}
 
-	// Give health checks time to run
-	time.Sleep(300 * time.Millisecond)
+	waitUntil(t, func() bool {
+		return ms.State().State == driver.StateRunning
+	}, 2*time.Second, "external service to become running")
 
 	state := ms.State()
-	if state.State != driver.StateRunning {
-		t.Errorf("expected running, got %v", state.State)
-	}
 	if state.PID != 0 {
 		t.Errorf("expected no PID for external service, got %d", state.PID)
 	}
@@ -359,12 +382,15 @@ func TestManagedServiceStaticPortInjection(t *testing.T) {
 		t.Fatalf("failed to start: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
-	ms.Stop(5 * time.Second)
+	// Wait for the process to run and produce log output
+	waitUntil(t, func() bool {
+		if ms.drv == nil {
+			return false
+		}
+		return len(ms.drv.LogLines(1)) > 0
+	}, 2*time.Second, "process to produce log output")
 
-	if ms.drv == nil {
-		t.Fatal("expected driver to exist")
-	}
+	ms.Stop(5 * time.Second)
 
 	lines := ms.drv.LogLines(10)
 	found := false
@@ -407,15 +433,15 @@ func TestManagedServiceSecretInjection(t *testing.T) {
 		t.Fatalf("failed to start: %v", err)
 	}
 
-	// Wait for process to run and exit
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the process to run and produce log output
+	waitUntil(t, func() bool {
+		if ms.drv == nil {
+			return false
+		}
+		return len(ms.drv.LogLines(1)) > 0
+	}, 2*time.Second, "process to produce log output")
 
 	ms.Stop(5 * time.Second)
-
-	// Check log output captured the secret
-	if ms.drv == nil {
-		t.Fatal("expected driver to exist")
-	}
 
 	lines := ms.drv.LogLines(10)
 	expected := "postgres://secret@localhost/db"

@@ -4,6 +4,9 @@ build:
     go build -ldflags "-X main.version={{version}}" -o aurelia ./cmd/aurelia/
 
 test:
+    go test -short ./...
+
+test-all:
     go test ./...
 
 test-integration:
@@ -28,3 +31,12 @@ clean:
 install-hooks:
     printf '#!/bin/sh\ngofmt -w .\ngit diff --quiet || { echo "gofmt reformatted files — re-stage and commit again"; exit 1; }\n' > .git/hooks/pre-commit
     chmod +x .git/hooks/pre-commit
+
+# Symlink skills from skills/ into .claude/skills/ for Claude Code discovery
+install-skills:
+    mkdir -p .claude/skills
+    for dir in skills/*/; do \
+        name=$(basename "$dir"); \
+        ln -sfn "$(pwd)/$dir" ".claude/skills/$name"; \
+    done
+    @echo "Installed $(ls -1 skills/ | wc -l | tr -d ' ') skill(s) to .claude/skills/"

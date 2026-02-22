@@ -42,7 +42,10 @@ routing:
 	defer d.Stop(5 * time.Second)
 
 	// Wait for initial service to start
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, func() bool {
+		s, _ := d.ServiceState("chat")
+		return s.State == "running"
+	}, 2*time.Second, "chat to become running")
 
 	stateBefore, err := d.ServiceState("chat")
 	if err != nil {
@@ -52,7 +55,7 @@ routing:
 	portBefore := stateBefore.Port
 
 	// Deploy
-	if err := d.DeployService("chat", 1*time.Second); err != nil {
+	if err := d.DeployService("chat", 50*time.Millisecond); err != nil {
 		t.Fatalf("DeployService: %v", err)
 	}
 
@@ -134,9 +137,9 @@ health:
   type: http
   path: /health
   port: %d
-  interval: 100ms
+  interval: 10ms
   timeout: 2s
-  grace_period: 100ms
+  grace_period: 10ms
   unhealthy_threshold: 2
 `, healthPort))
 
@@ -149,10 +152,13 @@ health:
 	}
 	defer d.Stop(5 * time.Second)
 
-	time.Sleep(300 * time.Millisecond)
+	waitUntil(t, func() bool {
+		s, _ := d.ServiceState("web")
+		return s.State == "running"
+	}, 2*time.Second, "web to become running")
 
 	// Deploy should succeed — health check against the real server
-	if err := d.DeployService("web", 1*time.Second); err != nil {
+	if err := d.DeployService("web", 50*time.Millisecond); err != nil {
 		t.Fatalf("DeployService: %v", err)
 	}
 
@@ -188,7 +194,10 @@ routing:
 	}
 	defer d.Stop(5 * time.Second)
 
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, func() bool {
+		s, _ := d.ServiceState("svc")
+		return s.State == "running"
+	}, 2*time.Second, "svc to become running")
 
 	// Manually allocate the deploy temp port to simulate an in-progress deploy
 	d.ports.AllocateTemporary("svc", deploySuffix)
@@ -224,16 +233,22 @@ service:
 	}
 	defer d.Stop(5 * time.Second)
 
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, func() bool {
+		s, _ := d.ServiceState("worker")
+		return s.State == "running"
+	}, 2*time.Second, "worker to become running")
 
 	pidBefore, _ := d.ServiceState("worker")
 
 	// Deploy should fall back to restart (no routing)
-	if err := d.DeployService("worker", 1*time.Second); err != nil {
+	if err := d.DeployService("worker", 50*time.Millisecond); err != nil {
 		t.Fatalf("DeployService: %v", err)
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, func() bool {
+		s, _ := d.ServiceState("worker")
+		return s.State == "running" && s.PID != pidBefore.PID
+	}, 2*time.Second, "worker to restart with new PID")
 
 	pidAfter, _ := d.ServiceState("worker")
 	if pidAfter.PID == pidBefore.PID && pidBefore.PID != 0 {
