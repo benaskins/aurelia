@@ -1,0 +1,19 @@
+service:
+  name: hello-static
+  type: native
+  command: go run ./examples/hello-static
+
+network:
+  port: 8080
+
+health:
+  type: http
+  path: /health
+  interval: 10s
+  timeout: 2s
+  grace_period: 5s
+
+restart:
+  policy: on-failure
+  max_attempts: 3
+  delay: 5s

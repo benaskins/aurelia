@@ -18,6 +18,10 @@ fmt:
 build-lean:
     go build -tags nocontainer,nogpu -ldflags "-s -w -X main.version={{version}}" -o aurelia-lean ./cmd/aurelia/
 
+test-examples:
+    docker build -f examples/Dockerfile -t aurelia-examples-test .
+    docker run --rm aurelia-examples-test
+
 clean:
     rm -f aurelia aurelia-lean
 
