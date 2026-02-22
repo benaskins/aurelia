@@ -91,9 +91,9 @@ All under `~/.aurelia/`: `config.yaml` (daemon config), `services/*.yaml` (servi
 
 ## Branching & PR Workflow
 
-`main` is protected: force-push and deletion are blocked, and the `ci` status check is required for all pushes (including admins). No PRs — commit directly to main.
+`main` is protected: force-push and deletion are blocked, linear history required. No PRs — commit directly to main.
 
-**CI model:** Local-first. Run `just test-all && just lint` before pushing. GitHub Actions CI runs on every push to main and must pass.
+**CI model:** Local-first. Run `just test-all && just lint` before pushing. GitHub Actions CI runs on every push to main (informational, not gating). CI gates PRs from forks.
 
 **Day-to-day workflow (direct to main):**
 ```bash
