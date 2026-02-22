@@ -153,12 +153,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	// Graceful shutdown — differentiate SIGTERM (orphan children) vs SIGINT (full teardown)
-	cancel()
 	if receivedSig == syscall.SIGTERM {
-		// SIGTERM: orphan native children, preserve state for adoption by next daemon
+		// SIGTERM: release supervision first (while context is still alive),
+		// then cancel context. Native children survive because NativeDriver
+		// uses exec.Command (not CommandContext).
 		d.Shutdown(daemon.DefaultStopTimeout)
+		cancel()
 	} else {
 		// SIGINT, API error, or any other case: full teardown
+		cancel()
 		d.Stop(daemon.DefaultStopTimeout)
 	}
 	srv.Shutdown(context.Background())

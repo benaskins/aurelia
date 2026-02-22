@@ -70,7 +70,12 @@ func (d *NativeDriver) Start(ctx context.Context) error {
 		return fmt.Errorf("process already running")
 	}
 
-	d.cmd = exec.CommandContext(ctx, d.command, d.args...)
+	// Use exec.Command (not CommandContext) so the child process lifetime is
+	// not tied to the Go context. This allows Daemon.Shutdown() to release
+	// supervision while leaving native processes running for adoption by the
+	// next daemon instance. Process termination is handled explicitly by
+	// NativeDriver.Stop() and the supervision loop.
+	d.cmd = exec.Command(d.command, d.args...)
 	d.cmd.Env = d.env
 	if d.workingDir != "" {
 		d.cmd.Dir = d.workingDir

@@ -37,9 +37,14 @@ func (d *Daemon) DeployService(name string, drainTimeout time.Duration) error {
 		return fmt.Errorf("deploy already in progress for %q (temp port %d)", name, existing)
 	}
 
-	// For services without routing, fall back to restart
+	// For services without routing, fall back to restart.
+	// Release the old port first so the restart allocates a fresh one —
+	// the old process may still be holding the port during shutdown.
 	if ms.spec.Routing == nil {
 		d.logger.Info("no routing config, falling back to restart", "service", name)
+		if ms.spec.NeedsDynamicPort() {
+			d.ports.Release(name)
+		}
 		return d.RestartService(name, DefaultStopTimeout)
 	}
 
