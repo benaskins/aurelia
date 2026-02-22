@@ -162,6 +162,39 @@ func (ms *ManagedService) Stop(timeout time.Duration) error {
 	}
 }
 
+// Release detaches supervision without killing the underlying process.
+// It stops health monitoring, cancels the supervision context (causing the
+// supervise goroutine to exit), and waits for it to finish. Unlike Stop(),
+// it does NOT call drv.Stop() — the process is left running as an orphan.
+func (ms *ManagedService) Release(timeout time.Duration) error {
+	ms.mu.Lock()
+	cancel := ms.cancel
+	stopped := ms.stopped
+	monitor := ms.monitor
+	ms.mu.Unlock()
+
+	if cancel == nil {
+		return nil
+	}
+
+	// Stop health monitoring
+	if monitor != nil {
+		monitor.Stop()
+	}
+
+	// Cancel the supervision context — this causes supervise() to exit
+	// via ctx.Done() without killing the process
+	cancel()
+
+	// Wait for supervision goroutine to finish
+	select {
+	case <-stopped:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("timed out waiting for service %s to release", ms.spec.Service.Name)
+	}
+}
+
 // Logs returns the last n lines from the service log buffer.
 func (ms *ManagedService) Logs(n int) []string {
 	ms.mu.Lock()

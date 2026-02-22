@@ -141,18 +141,26 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	slog.Info("aurelia daemon ready")
 
 	// Wait for signal or error
+	var receivedSig os.Signal
 	select {
 	case sig := <-sigCh:
 		slog.Info("received signal, shutting down", "signal", sig)
+		receivedSig = sig
 	case err := <-errCh:
 		if err != nil {
 			slog.Error("API server error", "error", err)
 		}
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown — differentiate SIGTERM (orphan children) vs SIGINT (full teardown)
 	cancel()
-	d.Stop(daemon.DefaultStopTimeout)
+	if receivedSig == syscall.SIGTERM {
+		// SIGTERM: orphan native children, preserve state for adoption by next daemon
+		d.Shutdown(daemon.DefaultStopTimeout)
+	} else {
+		// SIGINT, API error, or any other case: full teardown
+		d.Stop(daemon.DefaultStopTimeout)
+	}
 	srv.Shutdown(context.Background())
 	os.Remove(socketPath)
 	if apiAddr != "" {

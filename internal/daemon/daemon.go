@@ -247,6 +247,67 @@ func (d *Daemon) Stop(timeout time.Duration) {
 	}
 }
 
+// Shutdown exits gracefully without killing native processes, preserving the
+// state file so the next daemon instance can adopt them. Container services
+// are stopped (Docker manages their lifecycle independently). This is used
+// for SIGTERM / launchctl stop to enable zero-downtime restarts.
+func (d *Daemon) Shutdown(timeout time.Duration) {
+	d.mu.RLock()
+	g := d.deps
+	d.mu.RUnlock()
+
+	var order []string
+	if g != nil {
+		var err error
+		order, err = g.stopOrder()
+		if err != nil {
+			d.logger.Warn("stop order failed for shutdown, using unordered", "error", err)
+		}
+	}
+
+	// If no ordered list, collect all service names
+	if order == nil {
+		d.mu.RLock()
+		order = make([]string, 0, len(d.services))
+		for name := range d.services {
+			order = append(order, name)
+		}
+		d.mu.RUnlock()
+	}
+
+	for _, name := range order {
+		d.mu.RLock()
+		ms, ok := d.services[name]
+		d.mu.RUnlock()
+		if !ok {
+			continue
+		}
+
+		switch ms.spec.Service.Type {
+		case "container":
+			// Stop container services — Docker manages their restart independently
+			d.logger.Info("stopping container service for shutdown", "service", name)
+			if err := ms.Stop(timeout); err != nil {
+				d.logger.Error("error stopping container service", "service", name, "error", err)
+			}
+		case "native":
+			// Release native services — leave processes running for adoption
+			d.logger.Info("releasing native service for shutdown", "service", name)
+			if err := ms.Release(timeout); err != nil {
+				d.logger.Error("error releasing native service", "service", name, "error", err)
+			}
+		default:
+			// External services — just release supervision
+			d.logger.Info("releasing external service for shutdown", "service", name)
+			if err := ms.Release(timeout); err != nil {
+				d.logger.Error("error releasing external service", "service", name, "error", err)
+			}
+		}
+	}
+
+	d.logger.Info("shutdown complete, state file preserved for adoption")
+}
+
 // IsExternal returns true if the named service is an external (unmanaged) service.
 func (d *Daemon) IsExternal(name string) bool {
 	d.mu.RLock()

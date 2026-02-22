@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -980,5 +981,162 @@ service:
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected error to contain 'not found', got %q", err.Error())
+	}
+}
+
+func TestDaemonShutdownPreservesState(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := t.TempDir()
+
+	writeSpec(t, dir, "sleeper.yaml", `
+service:
+  name: sleeper
+  type: native
+  command: "sleep 300"
+`)
+
+	d := NewDaemon(dir, WithStateDir(stateDir))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for process to start and state to be persisted
+	time.Sleep(200 * time.Millisecond)
+
+	// Get the PID before shutdown
+	state, err := d.ServiceState("sleeper")
+	if err != nil {
+		t.Fatalf("ServiceState: %v", err)
+	}
+	if state.PID == 0 {
+		t.Fatal("expected non-zero PID")
+	}
+	pid := state.PID
+
+	// Shutdown (not Stop) — should preserve state and leave process running
+	d.Shutdown(5 * time.Second)
+
+	// Verify the state file still has the PID
+	sf := newStateFile(stateDir)
+	records, err := sf.load()
+	if err != nil {
+		t.Fatalf("loading state after shutdown: %v", err)
+	}
+	rec, ok := records["sleeper"]
+	if !ok {
+		t.Fatal("state file missing 'sleeper' record after shutdown")
+	}
+	if rec.PID != pid {
+		t.Errorf("expected PID %d in state file, got %d", pid, rec.PID)
+	}
+
+	// Verify the process is still alive
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		t.Fatalf("FindProcess(%d): %v", pid, err)
+	}
+	// Signal 0 checks if process exists without sending a signal
+	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		t.Errorf("process %d not alive after shutdown: %v", pid, err)
+	}
+
+	// Clean up: kill the orphaned process
+	proc.Kill()
+}
+
+func TestDaemonShutdownStopsContainers(t *testing.T) {
+	// Verify that Shutdown releases native services but would stop containers.
+	// We can't easily test real containers, but we verify the method completes
+	// without error on native-only services.
+	dir := t.TempDir()
+	stateDir := t.TempDir()
+
+	writeSpec(t, dir, "svc-a.yaml", `
+service:
+  name: svc-a
+  type: native
+  command: "sleep 300"
+`)
+	writeSpec(t, dir, "svc-b.yaml", `
+service:
+  name: svc-b
+  type: native
+  command: "sleep 300"
+`)
+
+	d := NewDaemon(dir, WithStateDir(stateDir))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Get PIDs
+	stateA, _ := d.ServiceState("svc-a")
+	stateB, _ := d.ServiceState("svc-b")
+	if stateA.PID == 0 || stateB.PID == 0 {
+		t.Fatal("expected non-zero PIDs for both services")
+	}
+
+	d.Shutdown(5 * time.Second)
+
+	// Both processes should still be alive
+	for _, pid := range []int{stateA.PID, stateB.PID} {
+		proc, _ := os.FindProcess(pid)
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			t.Errorf("process %d not alive after shutdown: %v", pid, err)
+		}
+		proc.Kill()
+	}
+
+	// State file should still have both records
+	sf := newStateFile(stateDir)
+	records, err := sf.load()
+	if err != nil {
+		t.Fatalf("loading state: %v", err)
+	}
+	if len(records) != 2 {
+		t.Errorf("expected 2 records in state file, got %d", len(records))
+	}
+}
+
+func TestDaemonStopClearsState(t *testing.T) {
+	// Verify that Stop() still clears state (full teardown behavior unchanged)
+	dir := t.TempDir()
+	stateDir := t.TempDir()
+
+	writeSpec(t, dir, "svc.yaml", `
+service:
+  name: svc
+  type: native
+  command: "sleep 300"
+`)
+
+	d := NewDaemon(dir, WithStateDir(stateDir))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	d.Stop(5 * time.Second)
+
+	// State should be cleared
+	sf := newStateFile(stateDir)
+	records, err := sf.load()
+	if err != nil {
+		t.Fatalf("loading state: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("expected empty state file after Stop, got %d records", len(records))
 	}
 }
