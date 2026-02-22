@@ -191,6 +191,28 @@ func TestExternalServiceInDependencyOrder(t *testing.T) {
 	}
 }
 
+func TestHasRequiredDependents(t *testing.T) {
+	// b requires a, c has no requires
+	g := newDepGraph([]*spec.ServiceSpec{
+		makeSpec("a", nil, nil),
+		makeSpec("b", nil, []string{"a"}),
+		makeSpec("c", nil, nil),
+	})
+
+	if !g.hasRequiredDependents("a") {
+		t.Error("expected a to have required dependents (b requires a)")
+	}
+	if g.hasRequiredDependents("b") {
+		t.Error("expected b to have no required dependents")
+	}
+	if g.hasRequiredDependents("c") {
+		t.Error("expected c to have no required dependents")
+	}
+	if g.hasRequiredDependents("nonexistent") {
+		t.Error("expected nonexistent to have no required dependents")
+	}
+}
+
 func TestStartOrderSkipsUnknownDeps(t *testing.T) {
 	// b depends on "external" which isn't in the graph — should be skipped
 	g := newDepGraph([]*spec.ServiceSpec{

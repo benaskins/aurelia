@@ -156,6 +156,20 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 		if err := d.startService(ctx, s); err != nil {
 			d.logger.Error("failed to start service", "service", name, "error", err)
+			continue
+		}
+
+		// Wait for health if other services require this one
+		if g.hasRequiredDependents(name) && s.Health != nil {
+			d.mu.RLock()
+			ms := d.services[name]
+			d.mu.RUnlock()
+
+			port := ms.EffectivePort()
+			d.logger.Info("waiting for dependency to become healthy", "service", name)
+			if err := d.waitForHealthy(ms, port); err != nil {
+				d.logger.Error("dependency failed health check", "service", name, "error", err)
+			}
 		}
 	}
 

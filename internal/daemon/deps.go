@@ -102,6 +102,11 @@ func (g *depGraph) stopOrder() ([]string, error) {
 	return order, nil
 }
 
+// hasRequiredDependents returns true if any service has this service in its requires list.
+func (g *depGraph) hasRequiredDependents(name string) bool {
+	return len(g.dependents[name]) > 0
+}
+
 // cascadeStopTargets returns all services that should be stopped when
 // the given service stops (hard dependents via requires).
 func (g *depGraph) cascadeStopTargets(name string) []string {

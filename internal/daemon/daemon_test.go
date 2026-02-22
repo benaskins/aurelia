@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -835,6 +837,123 @@ dependencies:
 
 	// Clean up
 	d.Stop(5 * time.Second)
+}
+
+func TestDaemonStartWaitsForDependencyHealth(t *testing.T) {
+	// Start a real HTTP server to act as the health endpoint for the "db" service.
+	// The dependent "app" service should only start after "db" passes its health check.
+	dir := t.TempDir()
+
+	// Find a free port for the health check server
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	healthPort := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	// Start the health endpoint immediately so the health check passes quickly
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	})
+	srv := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", healthPort), Handler: mux}
+	go srv.ListenAndServe()
+	t.Cleanup(func() { srv.Close() })
+
+	// db: external service with health check that has a dependent
+	writeSpec(t, dir, "db.yaml", fmt.Sprintf(`
+service:
+  name: db
+  type: external
+
+health:
+  type: http
+  path: /health
+  port: %d
+  interval: 100ms
+  timeout: 500ms
+  grace_period: 0s
+  unhealthy_threshold: 1
+`, healthPort))
+
+	// app: requires db — should not start until db is healthy
+	writeSpec(t, dir, "app.yaml", `
+service:
+  name: app
+  type: native
+  command: "sleep 10"
+
+dependencies:
+  after: [db]
+  requires: [db]
+`)
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+
+	// Wait for processes to settle
+	time.Sleep(200 * time.Millisecond)
+
+	// Both services should be registered
+	states := d.ServiceStates()
+	if len(states) != 2 {
+		t.Fatalf("expected 2 services, got %d", len(states))
+	}
+
+	// The app service should be running (db was healthy before it started)
+	state, err := d.ServiceState("app")
+	if err != nil {
+		t.Fatalf("ServiceState(app): %v", err)
+	}
+	if state.State != "running" {
+		t.Errorf("expected app to be running, got %v", state.State)
+	}
+}
+
+func TestDaemonStartSkipsHealthWaitForLeafService(t *testing.T) {
+	// A service with a health check but NO dependents should not be health-waited.
+	// This test verifies startup completes quickly even if the health check would fail.
+	dir := t.TempDir()
+
+	writeSpec(t, dir, "leaf.yaml", `
+service:
+  name: leaf
+  type: native
+  command: "sleep 10"
+
+health:
+  type: http
+  path: /health
+  port: 19996
+  interval: 100ms
+  timeout: 100ms
+  grace_period: 1s
+  unhealthy_threshold: 3
+`)
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	start := time.Now()
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+	elapsed := time.Since(start)
+
+	// If health-wait ran, it would take at least 1s (grace_period).
+	// Without health-wait, startup should be nearly instant.
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("startup took %v — health-wait should be skipped for leaf services", elapsed)
+	}
 }
 
 func TestDaemonStopServiceNotFound(t *testing.T) {
