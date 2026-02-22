@@ -27,7 +27,7 @@ Aurelia handles native processes, containers, dependencies, health checks, and r
 - Automatic restart with fixed or exponential backoff
 - Crash recovery — re-adopts running processes across daemon restarts
 - Dynamic port allocation from a configurable range
-- Zero-downtime blue-green deploys
+- Zero-downtime blue-green deploys for routed services
 - Traefik routing config generation
 - macOS Keychain secret injection with audit logging
 - Apple Silicon GPU/VRAM/thermal observability

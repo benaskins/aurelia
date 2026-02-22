@@ -25,7 +25,7 @@ Aurelia is a **macOS-native process supervisor** — a developer-focused alterna
    - `NativeDriver` — fork/exec via `os/exec`
    - `ContainerDriver` — Docker via `docker/docker` client
    - `AdoptedDriver` — attaches to existing PID for crash recovery
-3. **Daemon** (`internal/daemon`) — orchestrates `ManagedService` instances, each running a supervision goroutine. Handles dependency graph (topological sort for startup/shutdown ordering, cascade-stop for hard deps), state persistence (`~/.aurelia/state.json`), and Traefik config generation
+3. **Daemon** (`internal/daemon`) — orchestrates `ManagedService` instances, each running a supervision goroutine. Handles dependency graph (topological sort for startup/shutdown ordering, cascade-stop for hard deps), state persistence (`~/.aurelia/state.json`), Traefik config generation, and zero-downtime blue-green deploys (routed services only — non-routed services fall back to restart)
 4. **API** (`internal/api`) — REST over Unix socket (`~/.aurelia/aurelia.sock`), with optional TCP listener (`--api-addr`) protected by bearer token auth (`~/.aurelia/api.token`). Uses Go 1.22+ `http.ServeMux` pattern syntax
 5. **CLI** (`cmd/aurelia`) — cobra commands; `daemon` runs in-process, all others are HTTP clients to the API
 
@@ -61,6 +61,16 @@ type Store interface {
     GetMultiple(keys []string) (map[string]string, error)
 }
 ```
+
+### Signal semantics
+
+| Signal | Behavior | Use case |
+|--------|----------|----------|
+| SIGTERM | Orphan native children, preserve state, exit | `launchctl stop`, `just install` |
+| SIGINT | Full teardown — kill all children, clear state | Interactive Ctrl-C |
+| API stop | Full teardown — kill all children, clear state | `aurelia stop` CLI command |
+
+Container services are always stopped on any shutdown. Native processes use `exec.Command` (not `CommandContext`) so their lifetime is not tied to the Go context.
 
 ### Runtime files
 

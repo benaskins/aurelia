@@ -7,7 +7,7 @@
 | `aurelia up [service...]` | Start one or more services (all if no args) |
 | `aurelia down [service...]` | Stop one or more services (all if no args) |
 | `aurelia restart <service>` | Restart a service |
-| `aurelia deploy <service>` | Zero-downtime blue-green deploy |
+| `aurelia deploy <service>` | Zero-downtime blue-green deploy (requires `routing:` config; falls back to restart otherwise) |
 | `aurelia logs <service>` | Show recent log output (`-n` to set line count) |
 | `aurelia reload` | Re-read spec files and reconcile running services |
 | `aurelia check [file-or-dir]` | Validate spec files without running them |

@@ -89,6 +89,8 @@ just ship-prod <service>    # test → build → deploy (full pipeline)
 
 If tests fail — stop. Show failures. Do not deploy broken code.
 
+> **Note:** `aurelia deploy` performs zero-downtime blue-green deploys only for services with a `routing:` config. Non-routed services fall back to a simple restart (brief downtime).
+
 ### Verify
 
 After every deploy (new service or update), verify with evidence:
