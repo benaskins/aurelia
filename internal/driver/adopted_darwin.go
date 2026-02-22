@@ -23,3 +23,14 @@ func processName(pid int) (string, error) {
 	}
 	return name, nil
 }
+
+// processStartTime returns the process start time as a Unix epoch timestamp
+// (seconds). Combined with PID, this uniquely identifies a process and guards
+// against PID reuse.
+func processStartTime(pid int) (int64, error) {
+	kp, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil {
+		return 0, fmt.Errorf("sysctl kern.proc.pid.%d: %w", pid, err)
+	}
+	return kp.Proc.P_starttime.Sec, nil
+}

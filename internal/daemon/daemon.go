@@ -134,10 +134,11 @@ func (d *Daemon) Start(ctx context.Context) error {
 		// Try to adopt a previously-running process
 		if rec, ok := prevState[name]; ok && rec.Type == "native" && rec.PID > 0 {
 			// Verify the PID still belongs to the expected process (guard against PID reuse)
-			if !driver.VerifyProcess(rec.PID, rec.Command) {
+			if !driver.VerifyProcess(rec.PID, rec.Command, rec.StartTime) {
 				d.logger.Warn("PID reuse detected, skipping adoption",
 					"service", name, "pid", rec.PID,
-					"expected_command", rec.Command)
+					"expected_command", rec.Command,
+					"expected_start_time", rec.StartTime)
 			} else {
 				adopted, err := driver.NewAdopted(rec.PID)
 				if err == nil {
@@ -473,6 +474,9 @@ func (d *Daemon) startServiceLocked(ctx context.Context, s *spec.ServiceSpec) er
 				StartedAt: time.Now().Unix(),
 				Command:   s.Service.Command,
 			}
+			if st, err := driver.ProcessStartTime(pid); err == nil {
+				rec.StartTime = st
+			}
 			if err := d.state.set(name, rec); err != nil {
 				d.logger.Warn("failed to save service state", "service", name, "error", err)
 			}
@@ -569,6 +573,9 @@ func (d *Daemon) adoptService(ctx context.Context, s *spec.ServiceSpec, drv driv
 			Port:      ms.allocatedPort,
 			StartedAt: time.Now().Unix(),
 			Command:   s.Service.Command,
+		}
+		if st, err := driver.ProcessStartTime(pid); err == nil {
+			rec.StartTime = st
 		}
 		if err := d.state.set(name, rec); err != nil {
 			d.logger.Warn("failed to save service state", "service", name, "error", err)

@@ -23,6 +23,7 @@ type ServiceRecord struct {
 	Port      int    `json:"port,omitempty"`
 	StartedAt int64  `json:"started_at,omitempty"` // Unix timestamp
 	Command   string `json:"command,omitempty"`    // process command for PID reuse detection
+	StartTime int64  `json:"start_time,omitempty"` // OS-reported process start time for PID reuse detection
 }
 
 func newStateFile(dir string) *stateFile {

@@ -159,12 +159,31 @@ func (d *AdoptedDriver) LogLines(n int) []string {
 }
 
 // VerifyProcess checks whether the process at the given PID matches the expected
-// command name. This guards against PID reuse: if the OS recycled the PID for a
-// different process, the command won't match and adoption should be skipped.
-// Returns true if the process matches or if expectedCommand is empty (best effort).
-func VerifyProcess(pid int, expectedCommand string) bool {
+// command name and start time. This guards against PID reuse: if the OS recycled
+// the PID for a different process, the command or start time won't match and
+// adoption should be skipped.
+//
+// expectedStartTime of 0 skips the start-time check (backward compat with old
+// state files that don't have it). Returns true if all non-zero checks pass, or
+// if both expectedCommand and expectedStartTime are zero (best effort).
+func VerifyProcess(pid int, expectedCommand string, expectedStartTime int64) bool {
+	if expectedCommand == "" && expectedStartTime == 0 {
+		return true // no identity recorded, best effort
+	}
+
+	// Check start time first — it's the strongest signal against PID reuse.
+	if expectedStartTime != 0 {
+		actual, err := processStartTime(pid)
+		if err != nil {
+			return false
+		}
+		if actual != expectedStartTime {
+			return false
+		}
+	}
+
 	if expectedCommand == "" {
-		return true // no command recorded, best effort
+		return true // start time matched, no command to check
 	}
 
 	actual, err := processName(pid)
@@ -180,4 +199,12 @@ func VerifyProcess(pid int, expectedCommand string) bool {
 	}
 
 	return actual == filepath.Base(parts[0])
+}
+
+// ProcessStartTime returns the OS-reported start time for a process. The value
+// is platform-specific (Unix epoch seconds on Darwin, clock ticks since boot on
+// Linux) but is stable for the lifetime of the process and unique when combined
+// with the PID.
+func ProcessStartTime(pid int) (int64, error) {
+	return processStartTime(pid)
 }

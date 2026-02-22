@@ -105,18 +105,18 @@ func TestVerifyProcessMatchesSelf(t *testing.T) {
 	// The test binary is a Go executable — verify we can match it
 	pid := os.Getpid()
 
-	// Should match when expectedCommand is empty (best effort)
-	if !VerifyProcess(pid, "") {
-		t.Error("expected match with empty command")
+	// Should match when both expectedCommand and expectedStartTime are zero (best effort)
+	if !VerifyProcess(pid, "", 0) {
+		t.Error("expected match with empty command and zero start time")
 	}
 
 	// Should not match a completely wrong binary name
-	if VerifyProcess(pid, "definitely-not-this-binary") {
+	if VerifyProcess(pid, "definitely-not-this-binary", 0) {
 		t.Error("expected no match for wrong binary")
 	}
 
 	// Should fail for a dead PID
-	if VerifyProcess(99999999, "sleep") {
+	if VerifyProcess(99999999, "sleep", 0) {
 		t.Error("expected no match for dead PID")
 	}
 }
@@ -130,14 +130,80 @@ func TestVerifyProcessMatchesSleep(t *testing.T) {
 
 	pid := cmd.Process.Pid
 
-	if !VerifyProcess(pid, "sleep 30") {
+	if !VerifyProcess(pid, "sleep 30", 0) {
 		t.Error("expected match for 'sleep 30'")
 	}
-	if !VerifyProcess(pid, "/bin/sleep") {
+	if !VerifyProcess(pid, "/bin/sleep", 0) {
 		t.Error("expected match for '/bin/sleep' (base name comparison)")
 	}
-	if VerifyProcess(pid, "bash") {
+	if VerifyProcess(pid, "bash", 0) {
 		t.Error("expected no match for 'bash'")
+	}
+}
+
+func TestVerifyProcessStartTime(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting process: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	pid := cmd.Process.Pid
+
+	// Get the real start time
+	startTime, err := ProcessStartTime(pid)
+	if err != nil {
+		t.Fatalf("ProcessStartTime: %v", err)
+	}
+	if startTime == 0 {
+		t.Fatal("expected non-zero start time")
+	}
+
+	// Should match with correct start time
+	if !VerifyProcess(pid, "sleep 30", startTime) {
+		t.Error("expected match with correct start time")
+	}
+
+	// Should reject with wrong start time (simulates PID reuse)
+	if VerifyProcess(pid, "sleep 30", startTime-1000) {
+		t.Error("expected no match with wrong start time")
+	}
+
+	// Should reject with wrong start time even if command is empty
+	if VerifyProcess(pid, "", startTime-1000) {
+		t.Error("expected no match with wrong start time and empty command")
+	}
+
+	// Should match with correct start time and empty command
+	if !VerifyProcess(pid, "", startTime) {
+		t.Error("expected match with correct start time and empty command")
+	}
+}
+
+func TestProcessStartTime(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting process: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	st1, err := ProcessStartTime(cmd.Process.Pid)
+	if err != nil {
+		t.Fatalf("ProcessStartTime: %v", err)
+	}
+
+	// Calling again should return the same value (stable)
+	st2, err := ProcessStartTime(cmd.Process.Pid)
+	if err != nil {
+		t.Fatalf("ProcessStartTime (second call): %v", err)
+	}
+	if st1 != st2 {
+		t.Errorf("start time not stable: %d != %d", st1, st2)
+	}
+
+	// Dead PID should fail
+	if _, err := ProcessStartTime(99999999); err == nil {
+		t.Error("expected error for dead PID")
 	}
 }
 
