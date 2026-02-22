@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -17,6 +18,16 @@ containers with dependency ordering, health checks, and automatic restarts.
 
 --- aurelia is mother ---`,
 	Version: version,
+}
+
+func init() {
+	rootCmd.PersistentFlags().Bool("json", false, "Output in JSON format")
+}
+
+func printJSON(v any) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
 
 func main() {

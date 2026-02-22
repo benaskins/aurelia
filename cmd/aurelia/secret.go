@@ -101,11 +101,20 @@ var secretGetCmd = &cobra.Command{
 	},
 }
 
+type secretEntry struct {
+	Key    string `json:"key"`
+	Age    string `json:"age"`
+	Policy string `json:"policy"`
+	Status string `json:"status"`
+}
+
 var secretListCmd = &cobra.Command{
 	Use:     "list",
 	Short:   "List all secrets with age and rotation status",
 	Aliases: []string{"ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+
 		store, err := newAuditedStore()
 		if err != nil {
 			return err
@@ -116,14 +125,16 @@ var secretListCmd = &cobra.Command{
 		}
 
 		if len(keys) == 0 {
+			if jsonOut {
+				return printJSON([]secretEntry{})
+			}
 			fmt.Println("No secrets stored")
 			return nil
 		}
 
 		allMeta := store.Metadata().All()
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "KEY\tAGE\tPOLICY\tSTATUS")
+		var entries []secretEntry
 		for _, k := range keys {
 			age := "-"
 			policy := "-"
@@ -151,7 +162,17 @@ var secretListCmd = &cobra.Command{
 				}
 			}
 
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", k, age, policy, status)
+			entries = append(entries, secretEntry{Key: k, Age: age, Policy: policy, Status: status})
+		}
+
+		if jsonOut {
+			return printJSON(entries)
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "KEY\tAGE\tPOLICY\tSTATUS")
+		for _, e := range entries {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.Key, e.Age, e.Policy, e.Status)
 		}
 		w.Flush()
 		return nil

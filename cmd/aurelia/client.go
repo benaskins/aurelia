@@ -70,9 +70,15 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show service status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+
 		var states []daemon.ServiceState
 		if err := apiGet("/v1/services", &states); err != nil {
 			return err
+		}
+
+		if jsonOut {
+			return printJSON(states)
 		}
 
 		if len(states) == 0 {
@@ -132,11 +138,16 @@ var upCmd = &cobra.Command{
 	Aliases: []string{"start"},
 	Short:   "Start services",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+
 		if len(args) == 0 {
 			// Start all — reload picks up everything
 			result, err := apiPost("/v1/reload")
 			if err != nil {
 				return err
+			}
+			if jsonOut {
+				return printJSON(result)
 			}
 			fmt.Printf("Services loaded: %v\n", result)
 			return nil
@@ -148,7 +159,11 @@ var upCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
 				continue
 			}
-			fmt.Printf("%s: %v\n", name, result["status"])
+			if jsonOut {
+				printJSON(result)
+			} else {
+				fmt.Printf("%s: %v\n", name, result["status"])
+			}
 		}
 		return nil
 	},
@@ -160,6 +175,8 @@ var downCmd = &cobra.Command{
 	Aliases: []string{"stop"},
 	Short:   "Stop services",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+
 		if len(args) == 0 {
 			// Stop all
 			var states []daemon.ServiceState
@@ -171,13 +188,26 @@ var downCmd = &cobra.Command{
 			}
 		}
 
+		var results []map[string]any
 		for _, name := range args {
 			result, err := apiPost(fmt.Sprintf("/v1/services/%s/stop", name))
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+				if jsonOut {
+					results = append(results, map[string]any{"service": name, "error": err.Error()})
+				} else {
+					fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+				}
 				continue
 			}
-			fmt.Printf("%s: %v\n", name, result["status"])
+			if jsonOut {
+				result["service"] = name
+				results = append(results, result)
+			} else {
+				fmt.Printf("%s: %v\n", name, result["status"])
+			}
+		}
+		if jsonOut {
+			return printJSON(results)
 		}
 		return nil
 	},
@@ -189,9 +219,14 @@ var restartCmd = &cobra.Command{
 	Short: "Restart a service",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+
 		result, err := apiPost(fmt.Sprintf("/v1/services/%s/restart", args[0]))
 		if err != nil {
 			return err
+		}
+		if jsonOut {
+			return printJSON(result)
 		}
 		fmt.Printf("%s: %v\n", args[0], result["status"])
 		return nil
@@ -225,6 +260,11 @@ var deployCmd = &cobra.Command{
 
 		var result map[string]any
 		json.NewDecoder(resp.Body).Decode(&result)
+
+		jsonOut, _ := cmd.Flags().GetBool("json")
+		if jsonOut {
+			return printJSON(result)
+		}
 		fmt.Printf("%s: %v\n", args[0], result["status"])
 		return nil
 	},
@@ -236,9 +276,15 @@ var reloadCmd = &cobra.Command{
 	Short: "Reload service specs",
 	Long:  "Re-read spec files and reconcile: start new services, stop removed ones.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+
 		result, err := apiPost("/v1/reload")
 		if err != nil {
 			return err
+		}
+
+		if jsonOut {
+			return printJSON(result)
 		}
 
 		if added, ok := result["added"]; ok {
@@ -263,12 +309,18 @@ var logsCmd = &cobra.Command{
 	Short: "Show recent log output for a service",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
 		n, _ := cmd.Flags().GetInt("lines")
+
 		var resp struct {
 			Lines []string `json:"lines"`
 		}
 		if err := apiGet(fmt.Sprintf("/v1/services/%s/logs?n=%s", args[0], strconv.Itoa(n)), &resp); err != nil {
 			return err
+		}
+
+		if jsonOut {
+			return printJSON(resp)
 		}
 		for _, line := range resp.Lines {
 			fmt.Println(line)

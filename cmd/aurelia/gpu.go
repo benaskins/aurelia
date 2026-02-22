@@ -11,7 +11,12 @@ var gpuCmd = &cobra.Command{
 	Use:   "gpu",
 	Short: "Show GPU status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
 		info := gpu.QueryNow()
+
+		if jsonOut {
+			return printJSON(info)
+		}
 
 		fmt.Printf("GPU:              %s\n", info.Name)
 		if info.HasUnifiedMemory {
