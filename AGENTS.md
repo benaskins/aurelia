@@ -80,6 +80,32 @@ All under `~/.aurelia/`: `config.yaml` (daemon config), `services/*.yaml` (servi
 - Keychain package has darwin build tag; uses `MemoryStore` elsewhere
 - `Daemon` uses functional options pattern: `WithSecrets()`, `WithStateDir()`, `WithPortRange()`, `WithRouting()`
 
+## Branching & PR Workflow
+
+`main` is protected against force-push and deletion but allows direct pushes. No external dependencies in the development workflow.
+
+**CI model:** Local-first. Run `just test-all && just lint` before pushing to main. GitHub Actions CI exists only as a gate for external contributor PRs (forks) — it never runs for collaborator work.
+
+**Day-to-day workflow (direct to main):**
+```bash
+# ... make changes, commit ...
+just test-all && just lint        # Verify locally
+git push origin main
+```
+
+**Feature branches** (optional, for larger work or parallel agents):
+```
+feat/<description>       # New features
+fix/<description>        # Bug fixes
+refactor/<description>   # Code restructuring
+docs/<description>       # Documentation
+test/<description>       # Test additions/changes
+infra/<description>      # Infrastructure changes
+config/<description>     # Configuration changes
+```
+
+**Parallel agent work:** Each agent MUST use its own git worktree (`git worktree add`) to avoid conflicts. Never have parallel agents writing to the same working tree.
+
 ## Commit Conventions
 
 Conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `infra:`, `config:`

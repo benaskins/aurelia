@@ -1,20 +1,31 @@
 name: CI
 
+# Only runs on PRs from forks (external contributors).
+# Collaborators verify locally before merging.
 on:
-  push:
+  pull_request_target:
     branches: [main]
-  pull_request:
 
 jobs:
   ci:
+    # Skip CI for PRs authored by repo collaborators
+    if: >-
+      github.event.pull_request.author_association != 'OWNER' &&
+      github.event.pull_request.author_association != 'COLLABORATOR' &&
+      github.event.pull_request.author_association != 'MEMBER'
     runs-on: macos-latest
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+
+      - name: build
+        run: go build -o aurelia ./cmd/aurelia/
 
       - name: fmt
         run: test -z "$(gofmt -l .)"
@@ -22,5 +33,5 @@ jobs:
       - name: vet
         run: go vet ./...
 
-      - name: test
+      - name: test (full suite)
         run: go test ./...
