@@ -5,19 +5,13 @@ Project context for AI coding agents working in this repository.
 ## Build & Test Commands
 
 ```bash
-# Build
-go build -o aurelia ./cmd/aurelia/
-
-# Test
-go test ./...                                          # all unit tests
-go test ./internal/daemon/                             # single package
-go test ./internal/daemon/ -run TestDaemonStartStop    # single test
-go test -v ./...                                       # verbose output
-go test -tags integration ./...                        # integration tests (require Docker/OrbStack)
-
-# Format & vet
-go fmt ./...
-go vet ./...
+just build            # Build binary locally
+just install          # Build, install to ~/.local/bin, restart daemon
+just test             # Unit tests
+just test-all         # All tests including slow ones
+just test-integration # Integration tests (require Docker/OrbStack)
+just lint             # go vet
+just fmt              # go fmt
 ```
 
 ## Architecture
@@ -92,11 +86,15 @@ Conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `infra:`, 
 
 ## Skills
 
-Project-specific skills live in `skills/` and are symlinked to `.claude/skills/` for Claude Code discovery. Install with:
+Skills are embedded in the binary and available from any repo via `aurelia skills`:
 
 ```bash
-just install-skills
+aurelia skills                    # List available skills with descriptions
+aurelia skills aurelia-deploy     # Show full deployment workflow
+aurelia skills aurelia-debug      # Show debugging workflow
 ```
+
+For Claude Code discovery within this repo, skills are also symlinked to `.claude/skills/` via `just install-skills`.
 
 | Skill | Purpose |
 |---|---|

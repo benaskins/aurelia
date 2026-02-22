@@ -25,6 +25,13 @@ test-examples:
     docker build -f examples/Dockerfile -t aurelia-examples-test .
     docker run --rm aurelia-examples-test
 
+install: build
+    rm -f ~/.local/bin/aurelia
+    mv aurelia ~/.local/bin/aurelia
+    launchctl stop com.aurelia.daemon
+    launchctl start com.aurelia.daemon
+    @echo "Installed aurelia {{version}} and restarted daemon"
+
 clean:
     rm -f aurelia aurelia-lean
 
