@@ -92,6 +92,15 @@ Conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `infra:`, 
 
 ## Skills
 
-The `skills/` directory contains reusable workflow documents (markdown with YAML frontmatter) for common tasks. Each skill lives in its own subdirectory with a `SKILL.md` file:
+Project-specific skills live in `skills/` and are symlinked to `.claude/skills/` for Claude Code discovery. Install with:
 
-- **`skills/deploy-to-mesh/`** — Add a new service to the Aurelia service mesh with Traefik routing and TLS
+```bash
+just install-skills
+```
+
+| Skill | Purpose |
+|---|---|
+| aurelia-deploy | Add a new service to the mesh or ship changes to an existing one |
+| aurelia-debug | Diagnose problems with aurelia-managed services |
+
+Generic skills (brainstorming, debugging, tdd, verify) are installed globally from `~/dev/skills`.
