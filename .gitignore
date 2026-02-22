@@ -15,6 +15,9 @@ bin/
 .idea/
 .vscode/
 
+# Plan documents (session artifacts, not project docs)
+docs/plans/
+
 # Test artifacts
 *.tmp
 *.log
