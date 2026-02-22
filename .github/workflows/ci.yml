@@ -1,24 +1,27 @@
 name: CI
 
-# Only runs on PRs from forks (external contributors).
-# Collaborators verify locally before merging.
 on:
+  push:
+    branches: [main]
   pull_request_target:
     branches: [main]
 
 jobs:
   ci:
-    # Skip CI for PRs authored by repo collaborators
+    # For PRs, only run on external contributors (forks)
     if: >-
-      github.event.pull_request.author_association != 'OWNER' &&
-      github.event.pull_request.author_association != 'COLLABORATOR' &&
-      github.event.pull_request.author_association != 'MEMBER'
+      github.event_name == 'push' ||
+      (
+        github.event.pull_request.author_association != 'OWNER' &&
+        github.event.pull_request.author_association != 'COLLABORATOR' &&
+        github.event.pull_request.author_association != 'MEMBER'
+      )
     runs-on: macos-latest
 
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-go@v5
         with:
