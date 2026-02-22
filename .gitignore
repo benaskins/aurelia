@@ -5,8 +5,8 @@ bin/
 # macOS
 .DS_Store
 
-# Claude Code skill symlinks (installed via just install-skills)
-.claude/skills/
+# Claude Code (skill symlinks, worktrees, settings)
+.claude/
 
 # Editor
 *.swp

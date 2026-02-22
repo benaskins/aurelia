@@ -49,7 +49,7 @@ type Driver interface {
     Stop(ctx context.Context, timeout time.Duration) error
     Info() ProcessInfo
     Wait() (int, error)
-    Stdout() io.Reader
+    LogLines(n int) []string
 }
 
 // Store — secret storage (internal/keychain)
@@ -58,7 +58,6 @@ type Store interface {
     Get(key string) (string, error)
     List() ([]string, error)
     Delete(key string) error
-    GetMultiple(keys []string) (map[string]string, error)
 }
 ```
 
@@ -92,15 +91,15 @@ All under `~/.aurelia/`: `config.yaml` (daemon config), `services/*.yaml` (servi
 
 ## Branching & PR Workflow
 
-`main` is protected against force-push and deletion but allows direct pushes. No external dependencies in the development workflow.
+`main` is protected: force-push and deletion are blocked, and the `ci` status check is required for all pushes (including admins). No PRs — commit directly to main.
 
-**CI model:** Local-first. Run `just test-all && just lint` before pushing to main. GitHub Actions CI exists only as a gate for external contributor PRs (forks) — it never runs for collaborator work.
+**CI model:** Local-first. Run `just test-all && just lint` before pushing. GitHub Actions CI runs on every push to main and must pass.
 
 **Day-to-day workflow (direct to main):**
 ```bash
 # ... make changes, commit ...
 just test-all && just lint        # Verify locally
-git push origin main
+git push origin main              # CI must pass
 ```
 
 **Feature branches** (optional, for larger work or parallel agents):
