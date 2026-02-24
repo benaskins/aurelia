@@ -36,7 +36,7 @@ clean:
     rm -f aurelia aurelia-lean
 
 install-hooks:
-    printf '#!/bin/sh\ngofmt -w .\ngit diff --quiet || { echo "gofmt reformatted files — re-stage and commit again"; exit 1; }\n' > .git/hooks/pre-commit
+    printf '#!/bin/sh\ngofmt -w .\ngit diff --quiet || { echo "gofmt reformatted files — re-stage and commit again"; exit 1; }\n\n# slop guard\nif command -v slop-guard >/dev/null 2>&1; then\n  slop-guard --staged || exit 1\nfi\n' > .git/hooks/pre-commit
     chmod +x .git/hooks/pre-commit
 
 # Symlink skills from skills/ into .claude/skills/ for Claude Code discovery
