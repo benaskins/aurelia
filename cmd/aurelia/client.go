@@ -153,17 +153,26 @@ var upCmd = &cobra.Command{
 			return nil
 		}
 
+		var results []map[string]any
 		for _, name := range args {
 			result, err := apiPost(fmt.Sprintf("/v1/services/%s/start", name))
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+				if jsonOut {
+					results = append(results, map[string]any{"service": name, "error": err.Error()})
+				} else {
+					fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+				}
 				continue
 			}
 			if jsonOut {
-				printJSON(result)
+				result["service"] = name
+				results = append(results, result)
 			} else {
 				fmt.Printf("%s: %v\n", name, result["status"])
 			}
+		}
+		if jsonOut {
+			return printJSON(results)
 		}
 		return nil
 	},
