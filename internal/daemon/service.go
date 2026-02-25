@@ -130,7 +130,6 @@ func (ms *ManagedService) Stop(timeout time.Duration) error {
 	ms.mu.Lock()
 	cancel := ms.cancel
 	stopped := ms.stopped
-	drv := ms.drv
 	monitor := ms.monitor
 	ms.mu.Unlock()
 
@@ -146,20 +145,26 @@ func (ms *ManagedService) Stop(timeout time.Duration) error {
 		monitor.Stop()
 	}
 
-	// Stop the driver (graceful SIGTERM → SIGKILL) — skip for external
+	// Wait for supervision loop to finish — this ensures no new drivers
+	// are created after this point
+	select {
+	case <-stopped:
+	case <-time.After(timeout + 5*time.Second):
+		return fmt.Errorf("timed out waiting for service %s to stop", ms.spec.Service.Name)
+	}
+
+	// Stop the final driver — read ms.drv after supervision exits since the
+	// loop may have swapped in a new driver before seeing the cancellation
+	ms.mu.Lock()
+	drv := ms.drv
+	ms.mu.Unlock()
 	if drv != nil {
 		if err := drv.Stop(context.Background(), timeout); err != nil {
 			ms.logger.Warn("error stopping service", "error", err)
 		}
 	}
 
-	// Wait for supervision loop to finish
-	select {
-	case <-stopped:
-		return nil
-	case <-time.After(timeout + 5*time.Second):
-		return fmt.Errorf("timed out waiting for service %s to stop", ms.spec.Service.Name)
-	}
+	return nil
 }
 
 // Release detaches supervision without killing the underlying process.
