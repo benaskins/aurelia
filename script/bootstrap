@@ -1,0 +1,65 @@
+#!/bin/bash
+set -euo pipefail
+
+# Bootstrap script for Aurelia development environment.
+# Checks prerequisites and installs missing tools via Homebrew.
+
+REQUIRED_GO_MAJOR=1
+REQUIRED_GO_MINOR=22
+
+pass() { printf "  ✓ %s\n" "$1"; }
+fail() { printf "  ✗ %s\n" "$1"; }
+info() { printf "  → %s\n" "$1"; }
+
+echo "Bootstrapping Aurelia..."
+echo
+
+# --- Homebrew ---
+if ! command -v brew &>/dev/null; then
+  fail "Homebrew not found"
+  echo
+  echo "  Install it from https://brew.sh then re-run this script."
+  exit 1
+fi
+pass "Homebrew"
+
+# --- Go ---
+if command -v go &>/dev/null; then
+  go_version=$(go version | grep -oE 'go[0-9]+\.[0-9]+' | head -1 | sed 's/go//')
+  go_major=${go_version%%.*}
+  go_minor=${go_version#*.}
+  if [ "$go_major" -gt "$REQUIRED_GO_MAJOR" ] || { [ "$go_major" -eq "$REQUIRED_GO_MAJOR" ] && [ "$go_minor" -ge "$REQUIRED_GO_MINOR" ]; }; then
+    pass "Go $go_version"
+  else
+    info "Go $go_version found but >= $REQUIRED_GO_MAJOR.$REQUIRED_GO_MINOR required — upgrading"
+    brew install go
+    pass "Go (upgraded via Homebrew)"
+  fi
+else
+  info "Go not found — installing"
+  brew install go
+  pass "Go (installed via Homebrew)"
+fi
+
+# --- just ---
+if command -v just &>/dev/null; then
+  pass "just"
+else
+  info "just not found — installing"
+  brew install just
+  pass "just (installed via Homebrew)"
+fi
+
+# --- Docker (informational) ---
+if command -v docker &>/dev/null; then
+  pass "Docker (optional — needed for container services)"
+else
+  info "Docker not found (optional — install Docker Desktop or OrbStack for container services)"
+fi
+
+echo
+echo "Building..."
+just build
+
+echo
+echo "Done. Run 'just test' to verify."

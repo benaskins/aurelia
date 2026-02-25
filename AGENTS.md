@@ -4,6 +4,8 @@ Project context for AI coding agents working in this repository.
 
 ## Build & Test Commands
 
+First-time setup: run `script/bootstrap` to install prerequisites (Go, just) via Homebrew.
+
 ```bash
 just build            # Build binary locally
 just install          # Build, install to ~/.local/bin, restart daemon

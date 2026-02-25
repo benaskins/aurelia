@@ -40,7 +40,7 @@ Requires macOS and Go 1.22+ with cgo enabled. Docker or OrbStack required only f
 ```bash
 git clone https://github.com/benaskins/aurelia
 cd aurelia
-just build
+script/bootstrap
 ```
 
 Or without just:
