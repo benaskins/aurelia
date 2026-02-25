@@ -138,7 +138,10 @@ func (ms *ManagedService) Stop(timeout time.Duration) error {
 		return nil
 	}
 
-	// Stop health monitoring first
+	// Cancel the supervision loop first to prevent restarts during shutdown
+	cancel()
+
+	// Stop health monitoring
 	if monitor != nil {
 		monitor.Stop()
 	}
@@ -149,9 +152,6 @@ func (ms *ManagedService) Stop(timeout time.Duration) error {
 			ms.logger.Warn("error stopping service", "error", err)
 		}
 	}
-
-	// Then cancel the supervision loop
-	cancel()
 
 	// Wait for supervision loop to finish
 	select {
