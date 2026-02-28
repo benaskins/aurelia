@@ -42,6 +42,17 @@ var installCmd = &cobra.Command{
 			return fmt.Errorf("creating LaunchAgents dir: %w", err)
 		}
 
+		// Build optional EnvironmentVariables section
+		var envSection string
+		if aureliaRoot := os.Getenv("AURELIA_ROOT"); aureliaRoot != "" {
+			envSection = fmt.Sprintf(`    <key>EnvironmentVariables</key>
+    <dict>
+        <key>AURELIA_ROOT</key>
+        <string>%s</string>
+    </dict>
+`, html.EscapeString(aureliaRoot))
+		}
+
 		plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -53,7 +64,7 @@ var installCmd = &cobra.Command{
         <string>%s</string>
         <string>daemon</string>
     </array>
-    <key>RunAtLoad</key>
+%s    <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
@@ -63,7 +74,7 @@ var installCmd = &cobra.Command{
     <string>%s</string>
 </dict>
 </plist>
-`, launchAgentLabel, html.EscapeString(binary), html.EscapeString(logPath), html.EscapeString(logPath))
+`, launchAgentLabel, html.EscapeString(binary), envSection, html.EscapeString(logPath), html.EscapeString(logPath))
 
 		if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
 			return fmt.Errorf("writing plist: %w", err)
