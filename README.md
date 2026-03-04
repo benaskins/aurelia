@@ -33,9 +33,20 @@ Aurelia handles native processes, containers, dependencies, health checks, and r
 - Apple Silicon GPU/VRAM/thermal observability
 - LaunchAgent install for auto-start on login
 
-## Installation
+## Prerequisites
 
-Requires macOS and Go 1.22+ with cgo enabled. Docker or OrbStack required only for container services.
+**Required:**
+
+- **macOS** — Aurelia uses macOS-specific APIs (Keychain, Metal/IOKit) and is not cross-platform
+- **Go 1.26+** with cgo enabled — for building from source
+
+**Optional (needed only if you use the corresponding features):**
+
+- **Docker or OrbStack** — for `type: container` services
+- **Traefik** — for routing; Aurelia generates Traefik dynamic config files, Traefik serves them
+- **just** — task runner used by `script/bootstrap` and development commands (installed automatically by bootstrap)
+
+## Installation
 
 ```bash
 git clone https://github.com/benaskins/aurelia
