@@ -508,6 +508,7 @@ func (ms *ManagedService) createDriverWithPort(port int) driver.Driver {
 			Env:         env,
 			Cmd:         ms.spec.Args,
 			NetworkMode: ms.spec.Service.NetworkMode,
+			Privileged:  ms.spec.Service.Privileged,
 			Volumes:     ms.spec.Volumes,
 		})
 		if err != nil {
@@ -535,6 +536,7 @@ func (ms *ManagedService) createDriver() driver.Driver {
 			Env:         env,
 			Cmd:         ms.spec.Args,
 			NetworkMode: ms.spec.Service.NetworkMode,
+			Privileged:  ms.spec.Service.Privileged,
 			Volumes:     ms.spec.Volumes,
 		})
 		if err != nil {

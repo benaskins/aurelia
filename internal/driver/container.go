@@ -22,6 +22,7 @@ type ContainerConfig struct {
 	Env         []string
 	Cmd         []string          // command/args to pass to the container
 	NetworkMode string            // "host", "bridge", etc. Default: "host"
+	Privileged  bool              // run container in privileged mode
 	Volumes     map[string]string // host:container mount mappings
 	BufSize     int               // log ring buffer size (lines)
 }
@@ -93,6 +94,7 @@ func (d *ContainerDriver) Start(ctx context.Context) error {
 
 	hostConfig := &container.HostConfig{
 		NetworkMode: container.NetworkMode(d.cfg.NetworkMode),
+		Privileged:  d.cfg.Privileged,
 		RestartPolicy: container.RestartPolicy{
 			Name: container.RestartPolicyDisabled, // aurelia handles restarts
 		},

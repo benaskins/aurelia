@@ -38,6 +38,7 @@ type Service struct {
 	WorkingDir  string `yaml:"working_dir,omitempty"`  // native only
 	Image       string `yaml:"image,omitempty"`        // container only
 	NetworkMode string `yaml:"network_mode,omitempty"` // container only, default "host"
+	Privileged  bool   `yaml:"privileged,omitempty"`   // container only
 }
 
 type Network struct {
