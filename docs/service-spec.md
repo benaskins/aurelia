@@ -130,7 +130,7 @@ dependencies:
 |---|---|---|
 | `name` | string | Unique service identifier (required) |
 | `type` | string | `native`, `container`, or `external` (required) |
-| `command` | string | Command to run, split on whitespace and executed directly — no shell (native only) |
+| `command` | string | Command to run, split on whitespace and executed directly — no shell (native only). Pass arguments inline: `command: /usr/bin/myapp --flag value` |
 | `working_dir` | string | Working directory for the process (native only) |
 | `image` | string | Container image (container only) |
 | `network_mode` | string | Docker network mode, default `host` (container only) |
@@ -153,6 +153,41 @@ dependencies:
 - `native` — fork/exec of a local binary
 - `container` — Docker image managed via the Docker API
 - `external` — Aurelia does not start or stop this service; it only monitors health. Useful for representing external dependencies (databases, APIs) in the dependency graph.
+
+### Native command arguments
+
+Arguments are passed inline in `service.command`, not via the `args` field
+(`args` is for container image entrypoint overrides only):
+
+```yaml
+# correct — arguments inline in command
+service:
+  type: native
+  command: /opt/homebrew/bin/ollama serve
+
+# wrong — args under service: is silently ignored by the YAML parser;
+# the validator only catches top-level args, not misplaced ones
+service:
+  type: native
+  command: /opt/homebrew/bin/ollama
+  args: [serve]                         # no effect
+```
+
+For commands that need complex argument lists or environment variable setup,
+a wrapper script keeps the spec readable:
+
+```bash
+# ~/start-ollama.sh
+#!/bin/bash
+export OLLAMA_HOST=0.0.0.0
+exec /opt/homebrew/bin/ollama serve
+```
+
+```yaml
+service:
+  type: native
+  command: /Users/you/start-ollama.sh
+```
 
 ### `restart.policy` values
 

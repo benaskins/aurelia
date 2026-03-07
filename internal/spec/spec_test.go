@@ -812,7 +812,7 @@ func TestExpandEnv(t *testing.T) {
 		},
 		Volumes: map[string]string{
 			"${AURELIA_ROOT}/data/pg": "/var/lib/postgresql/data",
-			"/container/path":        "${AURELIA_ROOT}/host/path",
+			"/container/path":         "${AURELIA_ROOT}/host/path",
 		},
 	}
 
