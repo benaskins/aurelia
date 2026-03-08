@@ -1,5 +1,7 @@
 # Aurelia
 
+> Standalone tool · Part of the [lamina](https://github.com/benaskins/lamina-mono) workspace
+
 A process supervisor for macOS developers — manages native processes and Docker containers with dependency ordering, health checks, and automatic restarts.
 
 ## Why Aurelia
