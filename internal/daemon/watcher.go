@@ -49,6 +49,9 @@ func (d *Daemon) StartWatcher(ctx context.Context) error {
 				debounceTimer.Stop()
 			}
 			debounceTimer = time.AfterFunc(watcherDebounce, func() {
+				if ctx.Err() != nil {
+					return // context already cancelled, skip reload
+				}
 				d.logger.Info("reloading specs after file change")
 				result, err := d.Reload(ctx)
 				if err != nil {
