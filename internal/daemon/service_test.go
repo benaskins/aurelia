@@ -457,6 +457,101 @@ func TestManagedServiceSecretInjection(t *testing.T) {
 	}
 }
 
+func TestManagedServiceEnvVarInterpolation(t *testing.T) {
+	s := &spec.ServiceSpec{
+		Service: spec.Service{
+			Name:    "test-interpolation",
+			Type:    "native",
+			Command: "printenv SERVER_PORT",
+		},
+		Network: &spec.Network{Port: 9090},
+		Env: map[string]string{
+			"SERVER_PORT": "${PORT}",
+		},
+		Restart: &spec.RestartPolicy{
+			Policy: "never",
+		},
+	}
+
+	ms, err := NewManagedService(s, nil)
+	if err != nil {
+		t.Fatalf("failed to create: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := ms.Start(ctx); err != nil {
+		t.Fatalf("failed to start: %v", err)
+	}
+
+	waitUntil(t, func() bool {
+		if ms.drv == nil {
+			return false
+		}
+		return len(ms.drv.LogLines(1)) > 0
+	}, 2*time.Second, "process to produce log output")
+
+	ms.Stop(5 * time.Second)
+
+	lines := ms.drv.LogLines(10)
+	found := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "9090" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected SERVER_PORT=9090 (interpolated from PORT), log output: %v", lines)
+	}
+}
+
+func TestManagedServiceEnvVarServiceName(t *testing.T) {
+	s := &spec.ServiceSpec{
+		Service: spec.Service{
+			Name:    "my-web-app",
+			Type:    "native",
+			Command: "printenv APP_NAME",
+		},
+		Env: map[string]string{
+			"APP_NAME": "${SERVICE_NAME}",
+		},
+		Restart: &spec.RestartPolicy{
+			Policy: "never",
+		},
+	}
+
+	ms, err := NewManagedService(s, nil)
+	if err != nil {
+		t.Fatalf("failed to create: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := ms.Start(ctx); err != nil {
+		t.Fatalf("failed to start: %v", err)
+	}
+
+	waitUntil(t, func() bool {
+		if ms.drv == nil {
+			return false
+		}
+		return len(ms.drv.LogLines(1)) > 0
+	}, 2*time.Second, "process to produce log output")
+
+	ms.Stop(5 * time.Second)
+
+	lines := ms.drv.LogLines(10)
+	found := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "my-web-app" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected APP_NAME=my-web-app (interpolated from SERVICE_NAME), log output: %v", lines)
+	}
+}
+
 func TestManagedServiceStopNotRunning(t *testing.T) {
 	s := &spec.ServiceSpec{
 		Service: spec.Service{

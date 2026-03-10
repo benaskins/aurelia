@@ -868,6 +868,107 @@ env:
 	}
 }
 
+func TestInterpolateRuntimeVars(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		env         map[string]string
+		runtimeVars map[string]string
+		want        map[string]string
+	}{
+		{
+			name:        "braced syntax",
+			env:         map[string]string{"SERVER_PORT": "${PORT}"},
+			runtimeVars: map[string]string{"PORT": "8080"},
+			want:        map[string]string{"SERVER_PORT": "8080"},
+		},
+		{
+			name:        "bare syntax",
+			env:         map[string]string{"SERVER_PORT": "$PORT"},
+			runtimeVars: map[string]string{"PORT": "8080"},
+			want:        map[string]string{"SERVER_PORT": "8080"},
+		},
+		{
+			name:        "embedded in string",
+			env:         map[string]string{"LISTEN_ADDR": "0.0.0.0:${PORT}"},
+			runtimeVars: map[string]string{"PORT": "9090"},
+			want:        map[string]string{"LISTEN_ADDR": "0.0.0.0:9090"},
+		},
+		{
+			name:        "multiple vars",
+			env:         map[string]string{"APP_URL": "http://${SERVICE_NAME}:${PORT}"},
+			runtimeVars: map[string]string{"PORT": "3000", "SERVICE_NAME": "web"},
+			want:        map[string]string{"APP_URL": "http://web:3000"},
+		},
+		{
+			name:        "unknown var preserved",
+			env:         map[string]string{"FOO": "${UNKNOWN_VAR}"},
+			runtimeVars: map[string]string{"PORT": "8080"},
+			want:        map[string]string{"FOO": "${UNKNOWN_VAR}"},
+		},
+		{
+			name:        "no interpolation needed",
+			env:         map[string]string{"STATIC": "hello"},
+			runtimeVars: map[string]string{"PORT": "8080"},
+			want:        map[string]string{"STATIC": "hello"},
+		},
+		{
+			name:        "nil env returns nil",
+			env:         nil,
+			runtimeVars: map[string]string{"PORT": "8080"},
+			want:        nil,
+		},
+		{
+			name:        "empty runtime vars returns original",
+			env:         map[string]string{"FOO": "${PORT}"},
+			runtimeVars: map[string]string{},
+			want:        map[string]string{"FOO": "${PORT}"},
+		},
+		{
+			name:        "service name interpolation",
+			env:         map[string]string{"APP_NAME": "${SERVICE_NAME}"},
+			runtimeVars: map[string]string{"SERVICE_NAME": "my-app"},
+			want:        map[string]string{"APP_NAME": "my-app"},
+		},
+		{
+			name:        "mixed known and unknown",
+			env:         map[string]string{"ADDR": "${HOST}:${PORT}"},
+			runtimeVars: map[string]string{"PORT": "8080"},
+			want:        map[string]string{"ADDR": "${HOST}:8080"},
+		},
+		{
+			name:        "bare dollar at end of string",
+			env:         map[string]string{"FOO": "price$"},
+			runtimeVars: map[string]string{"PORT": "8080"},
+			want:        map[string]string{"FOO": "price$"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := InterpolateRuntimeVars(tt.env, tt.runtimeVars)
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("expected nil, got %v", got)
+				}
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Errorf("length mismatch: got %d, want %d", len(got), len(tt.want))
+			}
+			for k, wantV := range tt.want {
+				if gotV, ok := got[k]; !ok {
+					t.Errorf("missing key %q", k)
+				} else if gotV != wantV {
+					t.Errorf("key %q: got %q, want %q", k, gotV, wantV)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateContainerServiceAllowsArgs(t *testing.T) {
 	t.Parallel()
 	spec := &ServiceSpec{
