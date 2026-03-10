@@ -141,6 +141,30 @@ dependencies:
 |---|---|---|
 | `port` | int | Listen port. Set to `0` for dynamic allocation — aurelia picks a free port and injects it as the `PORT` environment variable. Your binary must read `$PORT` to know which port to bind. |
 
+### Dynamic port allocation and the `PORT` env var
+
+When you set `port: 0`, Aurelia allocates a free port from its configured range and sets the `PORT` environment variable in the service's process environment before starting it. The service **must** read `PORT` and bind to that port. If it doesn't, Aurelia will health-check the allocated port while the service listens on its own hardcoded port, and the service will appear permanently unhealthy.
+
+**How to read `PORT` in common frameworks:**
+
+| Runtime | How to use `PORT` |
+|---|---|
+| Go | `os.Getenv("PORT")` and pass to your listener |
+| Node.js | `process.env.PORT` — most frameworks (Express, Fastify) accept this directly |
+| Python (uvicorn) | `uvicorn app:app --port $PORT` in a wrapper script |
+| Python (gunicorn) | `gunicorn app:app --bind 0.0.0.0:$PORT` in a wrapper script |
+| Spring Boot | Set `SERVER_PORT=$PORT` in the `env:` block, or pass `--server.port=$PORT` via a wrapper |
+| JVM (Jetty, Misk) | Read `PORT` from the environment in your application bootstrap code |
+
+**If your service can't easily read `PORT`**, use a static port instead:
+
+```yaml
+network:
+  port: 8080    # fixed port — no PORT env var injected
+```
+
+This avoids the mismatch entirely. Dynamic allocation is most useful when running multiple instances of the same service or when you don't care which port a service gets.
+
 ### `dependencies`
 
 | Field | Description |
