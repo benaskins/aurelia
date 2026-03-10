@@ -20,7 +20,8 @@ type AdoptedDriver struct {
 	exitCode  int
 	exitErr   string
 	done      chan struct{}
-	stopCh    chan struct{} // signals monitor to stop polling
+	stopCh    chan struct{}    // signals monitor to stop polling
+	monitorWg sync.WaitGroup  // tracks monitor goroutine lifetime
 }
 
 // NewAdopted creates a driver that monitors an already-running process.
@@ -39,11 +40,13 @@ func NewAdopted(pid int) (*AdoptedDriver, error) {
 		stopCh:    make(chan struct{}),
 	}
 
+	d.monitorWg.Add(1)
 	go d.monitor()
 	return d, nil
 }
 
 func (d *AdoptedDriver) monitor() {
+	defer d.monitorWg.Done()
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -96,8 +99,10 @@ func (d *AdoptedDriver) Stop(ctx context.Context, timeout time.Duration) error {
 	d.state = StateStopping
 	d.mu.Unlock()
 
-	// Stop the monitor — we'll handle exit detection ourselves
+	// Stop the monitor and wait for it to exit so the goroutine
+	// doesn't leak when Stop returns.
 	close(d.stopCh)
+	d.monitorWg.Wait()
 
 	// Send SIGTERM
 	if err := syscall.Kill(d.pid, syscall.SIGTERM); err != nil {
