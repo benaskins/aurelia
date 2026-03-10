@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -117,6 +118,86 @@ func (s *ServiceSpec) ExpandEnv() {
 		}
 		s.Volumes = expanded
 	}
+}
+
+// InterpolateRuntimeVars performs variable interpolation on env values using
+// Aurelia-managed runtime variables (e.g. PORT, SERVICE_NAME). This supports
+// both ${VAR} and $VAR syntax within env block values, allowing specs like:
+//
+//	env:
+//	  SERVER_PORT: "${PORT}"
+//
+// Unlike ExpandEnv (which runs at load time against host env), this runs at
+// service start time when runtime variables like the allocated port are known.
+func InterpolateRuntimeVars(env map[string]string, runtimeVars map[string]string) map[string]string {
+	if len(env) == 0 || len(runtimeVars) == 0 {
+		return env
+	}
+	result := make(map[string]string, len(env))
+	for k, v := range env {
+		result[k] = expandRuntimeVars(v, runtimeVars)
+	}
+	return result
+}
+
+// expandRuntimeVars replaces ${VAR} and $VAR references in s with values from
+// vars. References to keys not in vars are left as literal text.
+func expandRuntimeVars(s string, vars map[string]string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+
+	i := 0
+	for i < len(s) {
+		if s[i] != '$' || i+1 >= len(s) {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+
+		// Peek ahead
+		j := i + 1
+		braced := false
+		if s[j] == '{' {
+			braced = true
+			j++
+		}
+
+		// Collect variable name (alphanumeric + underscore)
+		start := j
+		for j < len(s) && (s[j] == '_' || (s[j] >= 'a' && s[j] <= 'z') || (s[j] >= 'A' && s[j] <= 'Z') || (s[j] >= '0' && s[j] <= '9')) {
+			j++
+		}
+
+		name := s[start:j]
+
+		if braced {
+			if j < len(s) && s[j] == '}' {
+				j++ // consume closing brace
+			} else {
+				// Malformed ${...}, emit literally
+				b.WriteByte('$')
+				i++
+				continue
+			}
+		}
+
+		if name == "" {
+			// Bare $ or ${}, emit literally
+			b.WriteString(s[i:j])
+			i = j
+			continue
+		}
+
+		if val, ok := vars[name]; ok {
+			b.WriteString(val)
+		} else {
+			// Not a runtime var — preserve original text
+			b.WriteString(s[i:j])
+		}
+		i = j
+	}
+
+	return b.String()
 }
 
 // Load reads and parses a service spec from a YAML file.

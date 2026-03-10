@@ -523,7 +523,17 @@ func (ms *ManagedService) buildEnvWithPort(port int) []string {
 		env = append(env, fmt.Sprintf("PORT=%d", port))
 	}
 
-	for k, v := range ms.spec.Env {
+	// Build runtime variables for interpolation within env values.
+	// This allows specs like: SERVER_PORT: "${PORT}"
+	runtimeVars := map[string]string{
+		"SERVICE_NAME": ms.spec.Service.Name,
+	}
+	if port != 0 {
+		runtimeVars["PORT"] = fmt.Sprintf("%d", port)
+	}
+
+	interpolatedEnv := spec.InterpolateRuntimeVars(ms.spec.Env, runtimeVars)
+	for k, v := range interpolatedEnv {
 		env = append(env, k+"="+v)
 	}
 
