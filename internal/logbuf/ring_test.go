@@ -81,3 +81,63 @@ func TestRingEmpty(t *testing.T) {
 		t.Errorf("expected empty, got %v", lines)
 	}
 }
+
+func TestRingTruncatesLongLines(t *testing.T) {
+	t.Parallel()
+	r := NewWithMaxLineBytes(5, 10)
+
+	// Write a line longer than the 10-byte limit
+	r.Write([]byte("abcdefghijklmnop\n"))
+
+	lines := r.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(lines))
+	}
+	expected := "abcdefghij... (truncated)"
+	if lines[0] != expected {
+		t.Errorf("expected %q, got %q", expected, lines[0])
+	}
+}
+
+func TestRingDoesNotTruncateShortLines(t *testing.T) {
+	t.Parallel()
+	r := NewWithMaxLineBytes(5, 100)
+	r.Write([]byte("short line\n"))
+
+	lines := r.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(lines))
+	}
+	if lines[0] != "short line" {
+		t.Errorf("expected 'short line', got %q", lines[0])
+	}
+}
+
+func TestRingDefaultMaxLineBytes(t *testing.T) {
+	t.Parallel()
+	r := New(5)
+	if r.maxLineBytes != DefaultMaxLineBytes {
+		t.Errorf("expected default max line bytes %d, got %d", DefaultMaxLineBytes, r.maxLineBytes)
+	}
+}
+
+func TestRingTruncatesAtExactLimit(t *testing.T) {
+	t.Parallel()
+	r := NewWithMaxLineBytes(5, 5)
+
+	// Exactly at limit — should not truncate
+	r.Write([]byte("abcde\n"))
+	lines := r.Lines()
+	if lines[0] != "abcde" {
+		t.Errorf("expected 'abcde', got %q", lines[0])
+	}
+
+	// One byte over limit — should truncate
+	r2 := NewWithMaxLineBytes(5, 5)
+	r2.Write([]byte("abcdef\n"))
+	lines2 := r2.Lines()
+	expected := "abcde... (truncated)"
+	if lines2[0] != expected {
+		t.Errorf("expected %q, got %q", expected, lines2[0])
+	}
+}

@@ -7,14 +7,19 @@ import (
 	"sync"
 )
 
+// DefaultMaxLineBytes is the default maximum size of a single log line in bytes.
+// Lines longer than this are truncated to prevent unbounded memory usage.
+const DefaultMaxLineBytes = 8192
+
 // Ring is a thread-safe ring buffer that stores the last N lines of output.
 // It implements io.Writer so it can be used as stdout/stderr for a process.
 type Ring struct {
-	mu    sync.Mutex
-	lines []string
-	size  int
-	pos   int
-	full  bool
+	mu           sync.Mutex
+	lines        []string
+	size         int
+	pos          int
+	full         bool
+	maxLineBytes int
 	// partial holds an incomplete line (no trailing newline yet)
 	partial bytes.Buffer
 }
@@ -22,8 +27,22 @@ type Ring struct {
 // New creates a ring buffer that stores the last n lines.
 func New(n int) *Ring {
 	return &Ring{
-		lines: make([]string, n),
-		size:  n,
+		lines:        make([]string, n),
+		size:         n,
+		maxLineBytes: DefaultMaxLineBytes,
+	}
+}
+
+// NewWithMaxLineBytes creates a ring buffer with a custom per-line byte limit.
+// If maxBytes is <= 0, DefaultMaxLineBytes is used.
+func NewWithMaxLineBytes(n int, maxBytes int) *Ring {
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxLineBytes
+	}
+	return &Ring{
+		lines:        make([]string, n),
+		size:         n,
+		maxLineBytes: maxBytes,
 	}
 }
 
@@ -50,6 +69,9 @@ func (r *Ring) Write(p []byte) (int, error) {
 }
 
 func (r *Ring) addLine(line string) {
+	if len(line) > r.maxLineBytes {
+		line = line[:r.maxLineBytes] + "... (truncated)"
+	}
 	r.lines[r.pos] = line
 	r.pos = (r.pos + 1) % r.size
 	if r.pos == 0 {
