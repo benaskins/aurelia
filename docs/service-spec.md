@@ -221,6 +221,24 @@ service:
 
 `http` (GET to `path`, success on 2xx), `tcp` (connect to `port`), `exec` (runs `command`, success on exit 0)
 
+### Recommended `grace_period` values
+
+The `grace_period` field controls how long Aurelia waits after starting a service before running the first health check. If it's shorter than the service's startup time, the health check fails immediately, the service is marked unhealthy, and it gets restarted — creating a restart loop with no obvious cause.
+
+**If your service restarts immediately after starting, the first thing to check is whether `grace_period` is long enough.**
+
+Recommended starting points by runtime:
+
+| Runtime | Typical startup | Suggested `grace_period` |
+|---|---|---|
+| Go (native binary) | <1s | `2s` - `5s` |
+| Node.js | 1-3s | `5s` - `10s` |
+| Python (uvicorn/gunicorn) | 2-5s | `5s` - `15s` |
+| JVM (Spring Boot, Misk, Micronaut) | 5-30s | `15s` - `45s` |
+| Container (Docker pull + start) | varies | `30s` - `60s` |
+
+These are rough guidelines. Actual startup time depends on what your service does during initialization (database migrations, connection pool warmup, loading ML models, etc.). Measure your service's real startup time and set `grace_period` accordingly.
+
 ### `restart.backoff` values
 
 `fixed`, `exponential`
