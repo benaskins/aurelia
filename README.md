@@ -105,6 +105,7 @@ aurelia status
 - [Service Spec](docs/service-spec.md) — full YAML format, field reference, examples
 - [Architecture](docs/architecture.md) — layers, design approach, trade-offs
 - [Security](docs/security.md) — trust model, authentication, network exposure
+- [Non-Go Services](docs/non-go-services.md) — managing JVM, Python, and Node.js services
 
 ## License
 
