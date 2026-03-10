@@ -3,6 +3,7 @@ package spec
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -865,6 +866,90 @@ env:
 	}
 	if spec.Env["DATA_DIR"] != "/opt/aurelia/data" {
 		t.Errorf("Env[DATA_DIR] = %q, want expanded path", spec.Env["DATA_DIR"])
+	}
+}
+
+func TestWarningsSensitiveVolumeMounts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		volumes  map[string]string
+		wantWarn int
+		contains string
+	}{
+		{
+			name:     "docker socket",
+			volumes:  map[string]string{"/var/run/docker.sock": "/var/run/docker.sock"},
+			wantWarn: 1,
+			contains: "Docker daemon access",
+		},
+		{
+			name:     "etc shadow",
+			volumes:  map[string]string{"/etc/shadow": "/mnt/shadow"},
+			wantWarn: 1,
+			contains: "password hashes",
+		},
+		{
+			name:     "ssh directory",
+			volumes:  map[string]string{"/home/user/.ssh": "/root/.ssh"},
+			wantWarn: 1,
+			contains: "SSH private keys",
+		},
+		{
+			name:     "gnupg directory",
+			volumes:  map[string]string{"/home/user/.gnupg": "/root/.gnupg"},
+			wantWarn: 1,
+			contains: "GPG private keys",
+		},
+		{
+			name:     "root mount",
+			volumes:  map[string]string{"/": "/host"},
+			wantWarn: 1,
+			contains: "root filesystem",
+		},
+		{
+			name:     "safe volume no warning",
+			volumes:  map[string]string{"/data": "/app/data"},
+			wantWarn: 0,
+		},
+		{
+			name:     "no volumes no warning",
+			volumes:  nil,
+			wantWarn: 0,
+		},
+		{
+			name:     "etc passwd",
+			volumes:  map[string]string{"/etc/passwd": "/mnt/passwd"},
+			wantWarn: 1,
+			contains: "user account info",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			s := &ServiceSpec{
+				Service: Service{Name: "test", Type: "container", Image: "nginx"},
+				Volumes: tt.volumes,
+			}
+			warnings := s.Warnings()
+			if len(warnings) != tt.wantWarn {
+				t.Errorf("expected %d warnings, got %d: %v", tt.wantWarn, len(warnings), warnings)
+			}
+			if tt.contains != "" && len(warnings) > 0 {
+				found := false
+				for _, w := range warnings {
+					if strings.Contains(w, tt.contains) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected warning containing %q, got %v", tt.contains, warnings)
+				}
+			}
+		})
 	}
 }
 

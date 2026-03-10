@@ -10,11 +10,12 @@ import (
 )
 
 type checkResult struct {
-	Path  string `json:"path"`
-	Name  string `json:"name,omitempty"`
-	Type  string `json:"type,omitempty"`
-	Valid bool   `json:"valid"`
-	Error string `json:"error,omitempty"`
+	Path     string   `json:"path"`
+	Name     string   `json:"name,omitempty"`
+	Type     string   `json:"type,omitempty"`
+	Valid    bool     `json:"valid"`
+	Error    string   `json:"error,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 var checkCmd = &cobra.Command{
@@ -62,7 +63,9 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			results = append(results, checkResult{Path: path, Valid: false, Error: err.Error()})
 			failed++
 		} else {
-			results = append(results, checkResult{Path: path, Name: s.Service.Name, Type: string(s.Service.Type), Valid: true})
+			r := checkResult{Path: path, Name: s.Service.Name, Type: string(s.Service.Type), Valid: true}
+			r.Warnings = s.Warnings()
+			results = append(results, r)
 		}
 	}
 
@@ -74,6 +77,9 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	for _, r := range results {
 		if r.Valid {
 			fmt.Printf("OK    %s (%s, %s)\n", r.Path, r.Name, r.Type)
+			for _, w := range r.Warnings {
+				fmt.Fprintf(os.Stderr, "WARN  %s: %s\n", r.Path, w)
+			}
 		} else {
 			fmt.Fprintf(os.Stderr, "FAIL  %s\n      %v\n", r.Path, r.Error)
 		}

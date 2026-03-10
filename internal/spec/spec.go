@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -315,4 +316,43 @@ func (s *ServiceSpec) Validate() error {
 	}
 
 	return nil
+}
+
+// sensitivePaths lists host paths that are security-sensitive when mounted
+// into containers. Each entry has a path pattern and a human-readable reason.
+var sensitivePaths = []struct {
+	path   string
+	reason string
+}{
+	{"/etc/shadow", "password hashes"},
+	{"/etc/passwd", "user account info"},
+	{"/etc/master.passwd", "password hashes (BSD)"},
+	{"/.ssh", "SSH private keys"},
+	{"/.gnupg", "GPG private keys"},
+	{"/var/run/docker.sock", "Docker daemon access"},
+	{"/run/docker.sock", "Docker daemon access"},
+}
+
+// Warnings returns advisory warnings about the spec. These do not prevent
+// the spec from loading but highlight potentially risky configurations.
+func (s *ServiceSpec) Warnings() []string {
+	var warnings []string
+
+	for hostPath := range s.Volumes {
+		// Exact root mount
+		if hostPath == "/" {
+			warnings = append(warnings, "volume mounts host root filesystem (/)")
+			continue
+		}
+
+		clean := filepath.Clean(hostPath)
+		for _, sp := range sensitivePaths {
+			if clean == sp.path || strings.HasSuffix(clean, sp.path) {
+				warnings = append(warnings, fmt.Sprintf("volume mounts sensitive path %s (%s)", hostPath, sp.reason))
+				break
+			}
+		}
+	}
+
+	return warnings
 }
