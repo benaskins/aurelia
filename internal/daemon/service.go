@@ -57,10 +57,10 @@ type ManagedService struct {
 // The secrets store is optional — if nil, secret refs in the spec are skipped.
 func NewManagedService(s *spec.ServiceSpec, secrets keychain.Store) (*ManagedService, error) {
 	switch s.Service.Type {
-	case "native", "container", "external":
+	case "native", "container", "external", "remote":
 		// supported
 	default:
-		return nil, fmt.Errorf("unsupported service type %q (expected native, container, or external)", s.Service.Type)
+		return nil, fmt.Errorf("unsupported service type %q (expected native, container, external, or remote)", s.Service.Type)
 	}
 
 	return &ManagedService{
@@ -74,6 +74,11 @@ func NewManagedService(s *spec.ServiceSpec, secrets keychain.Store) (*ManagedSer
 // IsExternal returns true for external (unmanaged) services.
 func (ms *ManagedService) IsExternal() bool {
 	return ms.spec.Service.Type == "external"
+}
+
+// IsRemote returns true for remote (hook-managed) services.
+func (ms *ManagedService) IsRemote() bool {
+	return ms.spec.Service.Type == "remote"
 }
 
 // EffectivePort returns the dynamically allocated port if set,
@@ -105,6 +110,40 @@ func (ms *ManagedService) Start(ctx context.Context) error {
 		monitor := ms.startHealthMonitor(svcCtx)
 		ms.monitor = monitor
 		ms.mu.Unlock()
+		go func() {
+			<-svcCtx.Done()
+			if monitor != nil {
+				monitor.Stop()
+			}
+			ms.mu.Lock()
+			ms.cancel = nil
+			close(ms.stopped)
+			ms.mu.Unlock()
+		}()
+		return nil
+	}
+
+	if ms.IsRemote() {
+		// Run start hook, then health-monitor. No supervision loop.
+		drv := ms.createDriver()
+		ms.drv = drv
+		ms.mu.Unlock()
+
+		if err := drv.Start(svcCtx); err != nil {
+			ms.logger.Error("remote start hook failed", "error", err)
+			ms.mu.Lock()
+			ms.cancel = nil
+			close(ms.stopped)
+			ms.mu.Unlock()
+			cancel()
+			return err
+		}
+
+		ms.mu.Lock()
+		monitor := ms.startHealthMonitor(svcCtx)
+		ms.monitor = monitor
+		ms.mu.Unlock()
+
 		go func() {
 			<-svcCtx.Done()
 			if monitor != nil {
@@ -211,6 +250,18 @@ func (ms *ManagedService) State() ServiceState {
 
 	if ms.IsExternal() {
 		st.State = driver.StateRunning
+		if ms.spec.Health != nil {
+			st.Port = ms.spec.Health.Port
+		}
+		return st
+	}
+
+	if ms.IsRemote() {
+		if ms.drv != nil {
+			st.State = ms.drv.Info().State
+		} else {
+			st.State = driver.StateStopped
+		}
 		if ms.spec.Health != nil {
 			st.Port = ms.spec.Health.Port
 		}
@@ -501,6 +552,17 @@ func (ms *ManagedService) createDriverInternal(env []string, containerName strin
 			return driver.NewNative(driver.NativeConfig{Command: "false"})
 		}
 		return d
+	case "remote":
+		cfg := driver.RemoteConfig{
+			StartCmd: ms.spec.Hooks.Start,
+		}
+		if ms.spec.Hooks.Stop != "" {
+			cfg.StopCmd = ms.spec.Hooks.Stop
+		}
+		if ms.spec.Hooks.Restart != "" {
+			cfg.RestartCmd = ms.spec.Hooks.Restart
+		}
+		return driver.NewRemote(cfg)
 	default:
 		return driver.NewNative(driver.NativeConfig{
 			Command:    ms.spec.Service.Command,

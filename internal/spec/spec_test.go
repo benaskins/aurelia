@@ -758,6 +758,102 @@ func TestValidateExternalServiceRejectsRouting(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteServiceValid(t *testing.T) {
+	t.Parallel()
+	s := &ServiceSpec{
+		Service: Service{Name: "wire-proxy", Type: "remote"},
+		Hooks: &Hooks{
+			Start: "wrangler deploy",
+		},
+		Health: &HealthCheck{
+			Type:     "http",
+			Path:     "/health",
+			Port:     443,
+			Interval: Duration{30 * time.Second},
+			Timeout:  Duration{5 * time.Second},
+		},
+	}
+	if err := s.Validate(); err != nil {
+		t.Errorf("expected valid remote spec, got: %v", err)
+	}
+}
+
+func TestValidateRemoteServiceRequiresHooks(t *testing.T) {
+	t.Parallel()
+	s := &ServiceSpec{
+		Service: Service{Name: "remote-svc", Type: "remote"},
+		Health: &HealthCheck{
+			Type:     "http",
+			Path:     "/health",
+			Port:     443,
+			Interval: Duration{30 * time.Second},
+			Timeout:  Duration{5 * time.Second},
+		},
+	}
+	if err := s.Validate(); err == nil {
+		t.Error("expected error for remote service without hooks")
+	}
+}
+
+func TestValidateRemoteServiceRequiresStartHook(t *testing.T) {
+	t.Parallel()
+	s := &ServiceSpec{
+		Service: Service{Name: "remote-svc", Type: "remote"},
+		Hooks:   &Hooks{Stop: "wrangler delete"},
+		Health: &HealthCheck{
+			Type:     "http",
+			Path:     "/health",
+			Port:     443,
+			Interval: Duration{30 * time.Second},
+			Timeout:  Duration{5 * time.Second},
+		},
+	}
+	if err := s.Validate(); err == nil {
+		t.Error("expected error for remote service without start hook")
+	}
+}
+
+func TestValidateRemoteServiceRejectsCommand(t *testing.T) {
+	t.Parallel()
+	s := &ServiceSpec{
+		Service: Service{Name: "remote-svc", Type: "remote", Command: "/bin/foo"},
+		Hooks:   &Hooks{Start: "deploy"},
+	}
+	if err := s.Validate(); err == nil {
+		t.Error("expected error for remote service with command")
+	}
+}
+
+func TestValidateRemoteServiceRejectsImage(t *testing.T) {
+	t.Parallel()
+	s := &ServiceSpec{
+		Service: Service{Name: "remote-svc", Type: "remote", Image: "nginx"},
+		Hooks:   &Hooks{Start: "deploy"},
+	}
+	if err := s.Validate(); err == nil {
+		t.Error("expected error for remote service with image")
+	}
+}
+
+func TestValidateRemoteServiceExpandsHookEnv(t *testing.T) {
+	t.Setenv("TEST_CMD", "wrangler deploy")
+	s := &ServiceSpec{
+		Service: Service{Name: "remote-svc", Type: "remote"},
+		Hooks: &Hooks{
+			Start:   "$TEST_CMD",
+			Stop:    "$TEST_CMD --delete",
+			Restart: "$TEST_CMD",
+		},
+	}
+	s.ExpandEnv()
+	if s.Hooks.Start != "wrangler deploy" {
+		t.Errorf("start hook not expanded: %q", s.Hooks.Start)
+	}
+	if s.Hooks.Stop != "wrangler deploy --delete" {
+		t.Errorf("stop hook not expanded: %q", s.Hooks.Stop)
+	}
+}
+
 func TestSecretRef(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

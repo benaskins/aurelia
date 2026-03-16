@@ -25,6 +25,7 @@ type ServiceSpec struct {
 	Routing      *Routing             `yaml:"routing,omitempty"`
 	Health       *HealthCheck         `yaml:"health,omitempty"`
 	Restart      *RestartPolicy       `yaml:"restart,omitempty"`
+	Hooks        *Hooks               `yaml:"hooks,omitempty"`
 	Env          map[string]string    `yaml:"env,omitempty"`
 	Secrets      map[string]SecretRef `yaml:"secrets,omitempty"`
 	Volumes      map[string]string    `yaml:"volumes,omitempty"`
@@ -34,7 +35,7 @@ type ServiceSpec struct {
 
 type Service struct {
 	Name        string `yaml:"name"`
-	Type        string `yaml:"type"`                   // "native" | "container" | "external"
+	Type        string `yaml:"type"`                   // "native" | "container" | "external" | "remote"
 	Command     string `yaml:"command,omitempty"`      // native only
 	WorkingDir  string `yaml:"working_dir,omitempty"`  // native only
 	Image       string `yaml:"image,omitempty"`        // container only
@@ -75,6 +76,15 @@ type Routing struct {
 	TLSOptions string `yaml:"tls_options,omitempty"` // e.g. "mtls" for mTLS enforcement
 }
 
+// Hooks defines shell commands for remote service lifecycle management.
+// Start is required; Stop, Restart, and Logs are optional.
+type Hooks struct {
+	Start   string `yaml:"start"`
+	Stop    string `yaml:"stop,omitempty"`
+	Restart string `yaml:"restart,omitempty"`
+	Logs    string `yaml:"logs,omitempty"`
+}
+
 type Dependencies struct {
 	After    []string `yaml:"after,omitempty"`
 	Requires []string `yaml:"requires,omitempty"`
@@ -108,6 +118,12 @@ func (d Duration) MarshalYAML() (any, error) {
 func (s *ServiceSpec) ExpandEnv() {
 	s.Service.Command = os.ExpandEnv(s.Service.Command)
 	s.Service.WorkingDir = os.ExpandEnv(s.Service.WorkingDir)
+	if s.Hooks != nil {
+		s.Hooks.Start = os.ExpandEnv(s.Hooks.Start)
+		s.Hooks.Stop = os.ExpandEnv(s.Hooks.Stop)
+		s.Hooks.Restart = os.ExpandEnv(s.Hooks.Restart)
+		s.Hooks.Logs = os.ExpandEnv(s.Hooks.Logs)
+	}
 	for k, v := range s.Env {
 		s.Env[k] = os.ExpandEnv(v)
 	}
@@ -309,8 +325,21 @@ func (s *ServiceSpec) Validate() error {
 		if s.Routing != nil {
 			return fmt.Errorf("routing is not valid for external services")
 		}
+	case "remote":
+		if s.Service.Command != "" {
+			return fmt.Errorf("service.command is not valid for remote services")
+		}
+		if s.Service.Image != "" {
+			return fmt.Errorf("service.image is not valid for remote services")
+		}
+		if s.Hooks == nil {
+			return fmt.Errorf("hooks block is required for remote services")
+		}
+		if s.Hooks.Start == "" {
+			return fmt.Errorf("hooks.start is required for remote services")
+		}
 	default:
-		return fmt.Errorf("service.type must be \"native\", \"container\", or \"external\", got %q", s.Service.Type)
+		return fmt.Errorf("service.type must be \"native\", \"container\", \"external\", or \"remote\", got %q", s.Service.Type)
 	}
 
 	if h := s.Health; h != nil {
