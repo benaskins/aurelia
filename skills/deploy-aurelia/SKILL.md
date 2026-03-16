@@ -7,7 +7,13 @@ description: Use when adding a new service to the Aurelia mesh or shipping chang
 
 Follow `/deploy` — here's how each step works with aurelia.
 
-## Shipping changes
+## Deploying aurelia itself
+
+```bash
+just install    # build → rm → cp → SIGTERM daemon (launchd restarts it)
+```
+
+## Shipping service changes
 
 ```bash
 just ship-prod <service>    # test → build → deploy (full pipeline)
