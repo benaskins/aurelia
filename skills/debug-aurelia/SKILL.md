@@ -1,5 +1,5 @@
 ---
-name: aurelia-debug
+name: debug-aurelia
 description: Use when an aurelia-managed service is misbehaving, returning errors, or unreachable. Extends /debug with aurelia-specific tools.
 ---
 

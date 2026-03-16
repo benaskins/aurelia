@@ -1,5 +1,5 @@
 ---
-name: aurelia-deploy
+name: deploy-aurelia
 description: Use when adding a new service to the Aurelia mesh or shipping changes to an existing service. Extends /deploy with aurelia-specific tools.
 ---
 
