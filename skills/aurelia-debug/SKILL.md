@@ -1,15 +1,13 @@
 ---
 name: aurelia-debug
-description: Use when an aurelia-managed service is misbehaving, returning errors, or unreachable. Work outside-in — routing, then service health, then logs.
+description: Use when an aurelia-managed service is misbehaving, returning errors, or unreachable. Extends /debug with aurelia-specific tools.
 ---
 
 # Aurelia Debug
 
-Systematic debugging for services managed by aurelia. Work outside-in: can you reach it, is it running, what do the logs say.
+Follow `/debug` — here's how each step works with aurelia.
 
-## Outside-in
-
-### Check routing
+## Reproducing: work outside-in
 
 ```bash
 # Through Traefik (what users hit)
@@ -21,37 +19,24 @@ curl -sw "\n%{http_code}" http://127.0.0.1:<port>/health
 
 Direct works but Traefik doesn't → routing issue. Neither works → service is down.
 
-### Check service status
+## Logs and status
 
 ```bash
-aurelia status
+aurelia status              # Is it running, failed, or stopped?
+aurelia logs <service>      # Scan for ERROR, panic, connection refused, timeout
 ```
 
-Look at the service state — is it running, failed, or stopped? If failed, the logs will tell you why.
+## Common hypotheses
 
-### Read logs
-
-```bash
-aurelia logs <service>
-```
-
-Scan for: `ERROR`, `panic`, `connection refused`, `timeout`, stack traces.
-
-## Common issues
-
-| Symptom | Likely cause |
+| Symptom | Start here |
 |---|---|
-| 502 from Traefik | Service is down or unhealthy — check `aurelia status` |
-| Config changes ignored | Service needs restart — `aurelia restart <service>` |
-| Stale behaviour after rebuild | Didn't redeploy — `just deploy-prod <service>` |
+| 502 from Traefik | Service is down — `aurelia status` |
+| Config changes ignored | Needs restart — `aurelia restart <service>` |
+| Stale behaviour after rebuild | Needs redeploy — `just deploy-prod <service>` |
 | Service won't start | Binary missing, bad permissions, or port conflict — check logs |
-| Auth cookies not sent | Check domain (`.studio.internal`), Secure flag, HTTPS |
 
 ## Restart vs redeploy
 
-```bash
-aurelia restart <service>       # Restart with current binary/container
-just deploy-prod <service>      # Rebuild + redeploy
-```
+`aurelia restart <service>` — config changed. `just deploy-prod <service>` — code changed.
 
-Use restart when config changed. Use redeploy when code changed.
+$ARGUMENTS
