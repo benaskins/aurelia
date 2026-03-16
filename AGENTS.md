@@ -127,15 +127,17 @@ Skills are embedded in the binary and available from any repo via `aurelia skill
 
 ```bash
 aurelia skills                    # List available skills with descriptions
-aurelia skills aurelia-deploy     # Show full deployment workflow
-aurelia skills aurelia-debug      # Show debugging workflow
+aurelia skills deploy-aurelia     # Show deployment workflow
+aurelia skills debug-aurelia      # Show debugging workflow
+aurelia skills ground-aurelia     # Show orientation workflow
 ```
 
 For Claude Code discovery within this repo, skills are also symlinked to `.claude/skills/` via `just install-skills`.
 
-| Skill | Purpose |
-|---|---|
-| aurelia-deploy | Add a new service to the mesh or ship changes to an existing one |
-| aurelia-debug | Diagnose problems with aurelia-managed services |
+| Skill | Extends | Purpose |
+|---|---|---|
+| ground-aurelia | `/ground` | Orient in the aurelia service mesh |
+| debug-aurelia | `/debug` | Diagnose problems with aurelia-managed services |
+| deploy-aurelia | `/deploy` | Add a new service or ship changes to an existing one |
 
-Generic skills (brainstorming, debugging, tdd, verify) are installed globally from `~/dev/skills`.
+Generic skills (`/ground`, `/brainstorm`, `/iterate`, `/debug`, `/verify`, `/deploy`) are installed globally from [humanpowers](https://github.com/benaskins/humanpowers).
