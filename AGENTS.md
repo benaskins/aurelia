@@ -18,7 +18,7 @@ just fmt              # go fmt
 
 ## Architecture
 
-Aurelia is a **macOS-native process supervisor** — a developer-focused alternative to supervisord/launchd. Services are defined as YAML specs, managed by a daemon, and controlled via a CLI that communicates over a Unix socket.
+Aurelia is a **process supervisor with macOS-specific enhancements** — a developer-focused alternative to supervisord/launchd. Services are defined as YAML specs, managed by a daemon, and controlled via a CLI that communicates over a Unix socket.
 
 ### Layers (bottom-up)
 
