@@ -62,6 +62,12 @@ Or without just:
 go build -o aurelia ./cmd/aurelia/
 ```
 
+To build and install to `~/.local/bin` (restarts the daemon if running):
+
+```bash
+just install
+```
+
 For a leaner binary without container or GPU support:
 
 ```bash
