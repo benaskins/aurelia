@@ -22,6 +22,7 @@ containers with dependency ordering, health checks, and automatic restarts.
 
 func init() {
 	rootCmd.PersistentFlags().Bool("json", false, "Output in JSON format")
+	rootCmd.PersistentFlags().String("node", "", "Target a specific node for the command")
 }
 
 func printJSON(v any) error {

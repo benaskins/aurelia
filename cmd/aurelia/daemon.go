@@ -94,6 +94,14 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		opts = append(opts, daemon.WithRouting(routingOutput))
 		slog.Info("routing enabled", "output", routingOutput)
 	}
+	// Wire up peer nodes from config
+	if len(cfg.Nodes) > 0 {
+		peers := daemon.BuildPeers(cfg)
+		if len(peers) > 0 {
+			opts = append(opts, daemon.WithPeers(peers))
+			slog.Info("peer nodes configured", "count", len(peers))
+		}
+	}
 	d := daemon.NewDaemon(specDir, opts...)
 	if err := d.Start(ctx); err != nil {
 		return fmt.Errorf("starting daemon: %w", err)
@@ -118,6 +126,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	gpuObs.Start(ctx)
 
 	srv := api.NewServer(d, gpuObs)
+	if cfg.NodeName != "" {
+		srv.SetNodeName(cfg.NodeName)
+	}
 
 	// Start API in background
 	errCh := make(chan error, 1)

@@ -12,9 +12,11 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/benaskins/aurelia/internal/config"
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/driver"
 	"github.com/benaskins/aurelia/internal/gpu"
+	"github.com/benaskins/aurelia/internal/node"
 	"github.com/spf13/cobra"
 )
 
@@ -65,6 +67,27 @@ func apiPost(path string) (map[string]any, error) {
 	return result, nil
 }
 
+// resolveNodeClient returns a node.Client if --node is set, or nil for local.
+func resolveNodeClient(cmd *cobra.Command) (*node.Client, error) {
+	nodeName, _ := cmd.Flags().GetString("node")
+	if nodeName == "" {
+		return nil, nil
+	}
+	cfg, err := config.Load(config.DefaultPath())
+	if err != nil {
+		return nil, fmt.Errorf("loading config: %w", err)
+	}
+	n, ok := cfg.FindNode(nodeName)
+	if !ok {
+		return nil, fmt.Errorf("node %q not found in config", nodeName)
+	}
+	token, err := n.LoadToken()
+	if err != nil {
+		return nil, err
+	}
+	return node.New(n.Name, n.Addr, token), nil
+}
+
 // status command
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -72,9 +95,35 @@ var statusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
 
-		var states []daemon.ServiceState
-		if err := apiGet("/v1/services", &states); err != nil {
+		// If --node is set, query that specific remote node directly
+		remote, err := resolveNodeClient(cmd)
+		if err != nil {
 			return err
+		}
+
+		var states []daemon.ServiceState
+		if remote != nil {
+			raw, err := remote.Status()
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal(raw, &states); err != nil {
+				return fmt.Errorf("decoding status: %w", err)
+			}
+			// Stamp node name on each state
+			for i := range states {
+				if states[i].Node == "" {
+					states[i].Node = remote.Name
+				}
+			}
+		} else {
+			// Use cluster endpoint to aggregate all nodes
+			if err := apiGet("/v1/cluster/services", &states); err != nil {
+				// Fall back to local-only if cluster endpoint not available
+				if err := apiGet("/v1/services", &states); err != nil {
+					return err
+				}
+			}
 		}
 
 		if jsonOut {
@@ -86,8 +135,21 @@ var statusCmd = &cobra.Command{
 			return nil
 		}
 
+		// Determine if we should show the NODE column
+		hasNodes := false
+		for _, s := range states {
+			if s.Node != "" {
+				hasNodes = true
+				break
+			}
+		}
+
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "SERVICE\tTYPE\tSTATE\tHEALTH\tPID\tPORT\tUPTIME\tRESTARTS")
+		if hasNodes {
+			fmt.Fprintln(w, "NODE\tSERVICE\tTYPE\tSTATE\tHEALTH\tPID\tPORT\tUPTIME\tRESTARTS")
+		} else {
+			fmt.Fprintln(w, "SERVICE\tTYPE\tSTATE\tHEALTH\tPID\tPORT\tUPTIME\tRESTARTS")
+		}
 		for _, s := range states {
 			pid := "-"
 			if s.PID > 0 {
@@ -105,8 +167,17 @@ var statusCmd = &cobra.Command{
 			if health == "" {
 				health = "-"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
-				s.Name, s.Type, s.State, health, pid, port, uptime, s.RestartCount)
+			if hasNodes {
+				nodeName := s.Node
+				if nodeName == "" {
+					nodeName = "-"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+					nodeName, s.Name, s.Type, s.State, health, pid, port, uptime, s.RestartCount)
+			} else {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+					s.Name, s.Type, s.State, health, pid, port, uptime, s.RestartCount)
+			}
 		}
 		w.Flush()
 
@@ -139,8 +210,15 @@ var upCmd = &cobra.Command{
 	Short:   "Start services",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
+		remote, err := resolveNodeClient(cmd)
+		if err != nil {
+			return err
+		}
 
 		if len(args) == 0 {
+			if remote != nil {
+				return remote.ReloadService()
+			}
 			// Start all — reload picks up everything
 			result, err := apiPost("/v1/reload")
 			if err != nil {
@@ -155,20 +233,24 @@ var upCmd = &cobra.Command{
 
 		var results []map[string]any
 		for _, name := range args {
-			result, err := apiPost(fmt.Sprintf("/v1/services/%s/start", name))
-			if err != nil {
+			var opErr error
+			if remote != nil {
+				opErr = remote.StartService(name)
+			} else {
+				_, opErr = apiPost(fmt.Sprintf("/v1/services/%s/start", name))
+			}
+			if opErr != nil {
 				if jsonOut {
-					results = append(results, map[string]any{"service": name, "error": err.Error()})
+					results = append(results, map[string]any{"service": name, "error": opErr.Error()})
 				} else {
-					fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+					fmt.Fprintf(os.Stderr, "%s: %v\n", name, opErr)
 				}
 				continue
 			}
 			if jsonOut {
-				result["service"] = name
-				results = append(results, result)
+				results = append(results, map[string]any{"service": name, "status": "starting"})
 			} else {
-				fmt.Printf("%s: %v\n", name, result["status"])
+				fmt.Printf("%s: starting\n", name)
 			}
 		}
 		if jsonOut {
@@ -185,9 +267,13 @@ var downCmd = &cobra.Command{
 	Short:   "Stop services",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
+		remote, err := resolveNodeClient(cmd)
+		if err != nil {
+			return err
+		}
 
-		if len(args) == 0 {
-			// Stop all
+		if len(args) == 0 && remote == nil {
+			// Stop all local
 			var states []daemon.ServiceState
 			if err := apiGet("/v1/services", &states); err != nil {
 				return err
@@ -199,20 +285,24 @@ var downCmd = &cobra.Command{
 
 		var results []map[string]any
 		for _, name := range args {
-			result, err := apiPost(fmt.Sprintf("/v1/services/%s/stop", name))
-			if err != nil {
+			var opErr error
+			if remote != nil {
+				opErr = remote.StopService(name)
+			} else {
+				_, opErr = apiPost(fmt.Sprintf("/v1/services/%s/stop", name))
+			}
+			if opErr != nil {
 				if jsonOut {
-					results = append(results, map[string]any{"service": name, "error": err.Error()})
+					results = append(results, map[string]any{"service": name, "error": opErr.Error()})
 				} else {
-					fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+					fmt.Fprintf(os.Stderr, "%s: %v\n", name, opErr)
 				}
 				continue
 			}
 			if jsonOut {
-				result["service"] = name
-				results = append(results, result)
+				results = append(results, map[string]any{"service": name, "status": "stopping"})
 			} else {
-				fmt.Printf("%s: %v\n", name, result["status"])
+				fmt.Printf("%s: stopping\n", name)
 			}
 		}
 		if jsonOut {
@@ -229,6 +319,21 @@ var restartCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
+		remote, err := resolveNodeClient(cmd)
+		if err != nil {
+			return err
+		}
+
+		if remote != nil {
+			if err := remote.RestartService(args[0]); err != nil {
+				return err
+			}
+			if jsonOut {
+				return printJSON(map[string]string{"status": "restarting"})
+			}
+			fmt.Printf("%s: restarting\n", args[0])
+			return nil
+		}
 
 		result, err := apiPost(fmt.Sprintf("/v1/services/%s/restart", args[0]))
 		if err != nil {
@@ -249,6 +354,23 @@ var deployCmd = &cobra.Command{
 	Long:  "Performs a blue-green deploy: starts new instance, verifies health, switches routing, drains old.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+		remote, err := resolveNodeClient(cmd)
+		if err != nil {
+			return err
+		}
+
+		if remote != nil {
+			if err := remote.DeployService(args[0]); err != nil {
+				return err
+			}
+			if jsonOut {
+				return printJSON(map[string]string{"status": "deployed"})
+			}
+			fmt.Printf("%s: deployed\n", args[0])
+			return nil
+		}
+
 		drain, _ := cmd.Flags().GetString("drain")
 		path := fmt.Sprintf("/v1/services/%s/deploy", args[0])
 		if drain != "" {
@@ -270,7 +392,6 @@ var deployCmd = &cobra.Command{
 		var result map[string]any
 		json.NewDecoder(resp.Body).Decode(&result)
 
-		jsonOut, _ := cmd.Flags().GetBool("json")
 		if jsonOut {
 			return printJSON(result)
 		}
@@ -320,18 +441,31 @@ var logsCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		n, _ := cmd.Flags().GetInt("lines")
-
-		var resp struct {
-			Lines []string `json:"lines"`
-		}
-		if err := apiGet(fmt.Sprintf("/v1/services/%s/logs?n=%s", args[0], strconv.Itoa(n)), &resp); err != nil {
+		remote, err := resolveNodeClient(cmd)
+		if err != nil {
 			return err
 		}
 
-		if jsonOut {
-			return printJSON(resp)
+		var lines []string
+		if remote != nil {
+			lines, err = remote.Logs(args[0], n)
+			if err != nil {
+				return err
+			}
+		} else {
+			var resp struct {
+				Lines []string `json:"lines"`
+			}
+			if err := apiGet(fmt.Sprintf("/v1/services/%s/logs?n=%s", args[0], strconv.Itoa(n)), &resp); err != nil {
+				return err
+			}
+			lines = resp.Lines
 		}
-		for _, line := range resp.Lines {
+
+		if jsonOut {
+			return printJSON(map[string]any{"lines": lines})
+		}
+		for _, line := range lines {
 			fmt.Println(line)
 		}
 		return nil
