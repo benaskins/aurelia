@@ -68,9 +68,20 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	return s
 }
 
-// GenerateToken creates a random bearer token and writes it to tokenPath.
-// The token is required for TCP API connections.
+// GenerateToken loads an existing bearer token from tokenPath, or creates a
+// new one if the file does not exist. This ensures tokens are stable across
+// daemon restarts so peer nodes don't need re-configuration.
 func (s *Server) GenerateToken(tokenPath string) error {
+	// Reuse existing token if present
+	if data, err := os.ReadFile(tokenPath); err == nil {
+		token := strings.TrimSpace(string(data))
+		if len(token) > 0 {
+			s.token = token
+			s.logger.Info("API token loaded", "path", tokenPath)
+			return nil
+		}
+	}
+
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return fmt.Errorf("generating token: %w", err)
@@ -79,7 +90,7 @@ func (s *Server) GenerateToken(tokenPath string) error {
 	if err := os.WriteFile(tokenPath, []byte(s.token), 0600); err != nil {
 		return fmt.Errorf("writing token file: %w", err)
 	}
-	s.logger.Info("API token written", "path", tokenPath)
+	s.logger.Info("API token generated", "path", tokenPath)
 	return nil
 }
 
