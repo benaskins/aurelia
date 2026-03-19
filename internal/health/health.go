@@ -26,6 +26,7 @@ type Config struct {
 	Type               string        // "http" | "tcp" | "exec"
 	Path               string        // http only
 	Port               int           // http and tcp
+	Host               string        // target host (default "127.0.0.1")
 	Command            string        // exec only
 	Interval           time.Duration // time between checks
 	Timeout            time.Duration // max time per check
@@ -60,6 +61,9 @@ type Monitor struct {
 func NewMonitor(cfg Config, logger *slog.Logger, onUnhealthy func()) *Monitor {
 	if cfg.UnhealthyThreshold <= 0 {
 		cfg.UnhealthyThreshold = 3
+	}
+	if cfg.Host == "" {
+		cfg.Host = "127.0.0.1"
 	}
 	return &Monitor{
 		cfg:         cfg,
@@ -219,7 +223,11 @@ func SingleCheck(cfg Config) error {
 
 // checkHTTP performs a single HTTP health check (standalone version).
 func checkHTTP(ctx context.Context, cfg Config) error {
-	url := fmt.Sprintf("http://127.0.0.1:%d%s", cfg.Port, cfg.Path)
+	host := cfg.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	url := fmt.Sprintf("http://%s:%d%s", host, cfg.Port, cfg.Path)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
@@ -238,7 +246,11 @@ func checkHTTP(ctx context.Context, cfg Config) error {
 
 // checkTCP performs a single TCP health check (standalone version).
 func checkTCP(ctx context.Context, cfg Config) error {
-	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
+	host := cfg.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	addr := fmt.Sprintf("%s:%d", host, cfg.Port)
 	dialer := net.Dialer{Timeout: cfg.Timeout}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
@@ -258,7 +270,7 @@ func checkExec(ctx context.Context, cfg Config) error {
 }
 
 func (m *Monitor) checkHTTP(ctx context.Context) error {
-	url := fmt.Sprintf("http://127.0.0.1:%d%s", m.cfg.Port, m.cfg.Path)
+	url := fmt.Sprintf("http://%s:%d%s", m.cfg.Host, m.cfg.Port, m.cfg.Path)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -313,7 +325,7 @@ func (m *Monitor) checkRoute(ctx context.Context) error {
 }
 
 func (m *Monitor) checkTCP(ctx context.Context) error {
-	addr := fmt.Sprintf("127.0.0.1:%d", m.cfg.Port)
+	addr := fmt.Sprintf("%s:%d", m.cfg.Host, m.cfg.Port)
 	dialer := net.Dialer{Timeout: m.cfg.Timeout}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
