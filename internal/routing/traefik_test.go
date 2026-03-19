@@ -180,6 +180,55 @@ func TestGenerateOverwritesPrevious(t *testing.T) {
 	}
 }
 
+func TestGenerateRemoteHostURL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dynamic.yaml")
+	g := NewTraefikGenerator(path)
+
+	routes := []ServiceRoute{
+		{Name: "remote-svc", Hostname: "svc.example.local", Port: 8080, Host: "limen.local"},
+	}
+
+	if err := g.Generate(routes); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading output: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "http://limen.local:8080") {
+		t.Errorf("expected remote host URL, got:\n%s", content)
+	}
+	if strings.Contains(content, "127.0.0.1") {
+		t.Error("should not contain localhost for remote host")
+	}
+}
+
+func TestGenerateDefaultsToLocalhost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dynamic.yaml")
+	g := NewTraefikGenerator(path)
+
+	routes := []ServiceRoute{
+		{Name: "local-svc", Hostname: "svc.example.local", Port: 8080},
+	}
+
+	if err := g.Generate(routes); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading output: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "http://127.0.0.1:8080") {
+		t.Errorf("expected localhost URL when Host is empty, got:\n%s", content)
+	}
+}
+
 func TestSanitizeName(t *testing.T) {
 	if sanitizeName("my_service") != "my-service" {
 		t.Errorf("expected underscores replaced with hyphens")

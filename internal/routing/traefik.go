@@ -30,6 +30,7 @@ type ServiceRoute struct {
 	Port       int
 	TLS        bool
 	TLSOptions string // e.g. "mtls" — references a TLS options block in Traefik's static config
+	Host       string // backend host (default "127.0.0.1" for local services)
 }
 
 // Generate writes a Traefik dynamic config file for the given routes.
@@ -128,10 +129,14 @@ func (g *TraefikGenerator) buildConfig(routes []ServiceRoute) traefikConfig {
 		routers[routerName] = router
 
 		scheme := "http"
+		host := r.Host
+		if host == "" {
+			host = "127.0.0.1"
+		}
 		services[serviceName] = &traefikService{
 			LoadBalancer: &traefikLoadBalancer{
 				Servers: []traefikServer{
-					{URL: fmt.Sprintf("%s://127.0.0.1:%d", scheme, r.Port)},
+					{URL: fmt.Sprintf("%s://%s:%d", scheme, host, r.Port)},
 				},
 			},
 		}
