@@ -217,6 +217,11 @@ func expandRuntimeVars(s string, vars map[string]string) string {
 }
 
 // Load reads and parses a service spec from a YAML file.
+//
+// Security: spec files are trusted input. They live in ~/.aurelia/services/
+// which is owner-only (0700) and are written by the machine operator. Specs
+// can reference arbitrary binaries, bind ports, mount volumes, and inject
+// secrets — treat them like shell scripts. See issue #53.
 func Load(path string) (*ServiceSpec, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -238,6 +243,7 @@ func Load(path string) (*ServiceSpec, error) {
 }
 
 // LoadDir reads all YAML service specs from a directory.
+// See [Load] for the security model — spec files are trusted input.
 func LoadDir(dir string) ([]*ServiceSpec, error) {
 	entries, err := filepath.Glob(filepath.Join(dir, "*.yaml"))
 	if err != nil {
