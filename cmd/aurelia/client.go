@@ -20,8 +20,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func apiClient() *http.Client {
-	socketPath := defaultSocketPath()
+func apiClient() (*http.Client, error) {
+	socketPath, err := defaultSocketPath()
+	if err != nil {
+		return nil, err
+	}
 	return &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
@@ -29,11 +32,15 @@ func apiClient() *http.Client {
 				return net.Dial("unix", socketPath)
 			},
 		},
-	}
+	}, nil
 }
 
 func apiGet(path string, v any) error {
-	resp, err := apiClient().Get("http://aurelia" + path)
+	client, err := apiClient()
+	if err != nil {
+		return err
+	}
+	resp, err := client.Get("http://aurelia" + path)
 	if err != nil {
 		return fmt.Errorf("connecting to daemon: %w (is aurelia daemon running?)", err)
 	}
@@ -48,7 +55,11 @@ func apiGet(path string, v any) error {
 }
 
 func apiPost(path string) (map[string]any, error) {
-	resp, err := apiClient().Post("http://aurelia"+path, "application/json", nil)
+	client, err := apiClient()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Post("http://aurelia"+path, "application/json", nil)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to daemon: %w (is aurelia daemon running?)", err)
 	}
@@ -376,7 +387,10 @@ var deployCmd = &cobra.Command{
 		if drain != "" {
 			path += "?drain=" + drain
 		}
-		client := apiClient()
+		client, err := apiClient()
+		if err != nil {
+			return err
+		}
 		client.Timeout = 5 * time.Minute // deploy can take a while
 		resp, err := client.Post("http://aurelia"+path, "application/json", nil)
 		if err != nil {

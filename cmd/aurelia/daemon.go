@@ -108,7 +108,10 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start API server
-	socketPath := defaultSocketPath()
+	socketPath, err := defaultSocketPath()
+	if err != nil {
+		return err
+	}
 	// Check if another daemon is already running
 	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
 	if err == nil {
@@ -185,10 +188,10 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func defaultSocketPath() string {
+func defaultSocketPath() (string, error) {
 	dir, err := aureliaHome()
 	if err != nil {
-		return "/tmp/aurelia.sock"
+		return "", fmt.Errorf("cannot determine socket path: %w", err)
 	}
-	return filepath.Join(dir, "aurelia.sock")
+	return filepath.Join(dir, "aurelia.sock"), nil
 }
