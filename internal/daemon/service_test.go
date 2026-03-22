@@ -575,6 +575,123 @@ func TestManagedServiceStopNotRunning(t *testing.T) {
 	}
 }
 
+func TestManagedServiceInspect(t *testing.T) {
+	secrets := keychain.NewMemoryStore()
+	secrets.Set("book/database-url", "postgres://aurelia:aurelia@localhost/book")
+
+	s := &spec.ServiceSpec{
+		Service: spec.Service{
+			Name:    "book",
+			Type:    "native",
+			Command: "sleep 60",
+		},
+		Network: &spec.Network{Port: 8080},
+		Routing: &spec.Routing{
+			Hostname: "book.hestia.internal",
+			TLS:      true,
+		},
+		Health: &spec.HealthCheck{
+			Type:     "http",
+			Path:     "/health",
+			Interval: spec.Duration{Duration: 10 * time.Second},
+			Timeout:  spec.Duration{Duration: 2 * time.Second},
+		},
+		Dependencies: &spec.Dependencies{
+			After:    []string{"postgres", "auth"},
+			Requires: []string{"postgres"},
+		},
+		Restart: &spec.RestartPolicy{
+			Policy:      "on-failure",
+			MaxAttempts: 3,
+			Delay:       spec.Duration{Duration: 15 * time.Second},
+			Backoff:     "exponential",
+		},
+		Env: map[string]string{
+			"BASE_CURRENCY": "AUD",
+			"AUTH_URL":      "https://auth.hestia.internal",
+		},
+		Secrets: map[string]spec.SecretRef{
+			"DATABASE_URL": {Keychain: "book/database-url"},
+		},
+	}
+
+	ms, err := NewManagedService(s, secrets)
+	if err != nil {
+		t.Fatalf("failed to create: %v", err)
+	}
+
+	// Inspect without starting — should show stopped state + full spec
+	si := ms.Inspect()
+
+	if si.Name != "book" {
+		t.Errorf("name = %q, want book", si.Name)
+	}
+	if si.Type != "native" {
+		t.Errorf("type = %q, want native", si.Type)
+	}
+	if si.State != "stopped" {
+		t.Errorf("state = %q, want stopped", si.State)
+	}
+	if si.Command != "sleep 60" {
+		t.Errorf("command = %q, want sleep 60", si.Command)
+	}
+	if si.Port != 8080 {
+		t.Errorf("port = %d, want 8080", si.Port)
+	}
+
+	// Env
+	if si.Env["BASE_CURRENCY"] != "AUD" {
+		t.Errorf("env BASE_CURRENCY = %q, want AUD", si.Env["BASE_CURRENCY"])
+	}
+
+	// Secrets resolved
+	if si.Secrets["DATABASE_URL"] != "postgres://aurelia:aurelia@localhost/book" {
+		t.Errorf("secret DATABASE_URL = %q, want postgres://aurelia:aurelia@localhost/book", si.Secrets["DATABASE_URL"])
+	}
+
+	// Routing
+	if si.Routing == nil || si.Routing.Hostname != "book.hestia.internal" {
+		t.Errorf("routing hostname = %v, want book.hestia.internal", si.Routing)
+	}
+
+	// Dependencies
+	if si.Dependencies == nil || len(si.Dependencies.After) != 2 {
+		t.Errorf("dependencies after = %v, want [postgres auth]", si.Dependencies)
+	}
+
+	// Restart
+	if si.Restart == nil || si.Restart.Policy != "on-failure" {
+		t.Errorf("restart policy = %v, want on-failure", si.Restart)
+	}
+}
+
+func TestManagedServiceInspectMissingSecret(t *testing.T) {
+	secrets := keychain.NewMemoryStore()
+	// Don't set the secret — should show error
+
+	s := &spec.ServiceSpec{
+		Service: spec.Service{
+			Name:    "test-missing-secret",
+			Type:    "native",
+			Command: "sleep 60",
+		},
+		Secrets: map[string]spec.SecretRef{
+			"DATABASE_URL": {Keychain: "missing/key"},
+		},
+		Restart: &spec.RestartPolicy{Policy: "never"},
+	}
+
+	ms, err := NewManagedService(s, secrets)
+	if err != nil {
+		t.Fatalf("failed to create: %v", err)
+	}
+
+	si := ms.Inspect()
+	if !strings.Contains(si.Secrets["DATABASE_URL"], "<error:") {
+		t.Errorf("expected error marker for missing secret, got %q", si.Secrets["DATABASE_URL"])
+	}
+}
+
 func TestManagedServiceStopExternal(t *testing.T) {
 	s := &spec.ServiceSpec{
 		Service: spec.Service{

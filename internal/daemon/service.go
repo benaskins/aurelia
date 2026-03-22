@@ -29,6 +29,30 @@ type ServiceState struct {
 	Node         string        `json:"node,omitempty"`
 }
 
+// ServiceInspect is the full resolved config and runtime state of a managed service.
+type ServiceInspect struct {
+	// Runtime state
+	Name         string       `json:"name"`
+	Type         string       `json:"type"`
+	State        driver.State `json:"state"`
+	Health       string       `json:"health"`
+	PID          int          `json:"pid,omitempty"`
+	Port         int          `json:"port,omitempty"`
+	Uptime       string       `json:"uptime,omitempty"`
+	RestartCount int          `json:"restart_count"`
+
+	// Resolved spec
+	Command      string              `json:"command,omitempty"`
+	Image        string              `json:"image,omitempty"`
+	Env          map[string]string   `json:"env,omitempty"`
+	Secrets      map[string]string   `json:"secrets,omitempty"`
+	Routing      *spec.Routing       `json:"routing,omitempty"`
+	HealthCheck  *spec.HealthCheck   `json:"health_check,omitempty"`
+	Dependencies *spec.Dependencies  `json:"dependencies,omitempty"`
+	Restart      *spec.RestartPolicy `json:"restart,omitempty"`
+	SpecHash     string              `json:"spec_hash,omitempty"`
+}
+
 // ManagedService ties a spec to a running driver with restart and health monitoring.
 type ManagedService struct {
 	spec    *spec.ServiceSpec
@@ -283,6 +307,46 @@ func (ms *ManagedService) State() ServiceState {
 	}
 
 	return st
+}
+
+// Inspect returns the full resolved config and runtime state.
+// Secret values are resolved from the keychain and included in plaintext.
+func (ms *ManagedService) Inspect() ServiceInspect {
+	st := ms.State()
+
+	si := ServiceInspect{
+		Name:         st.Name,
+		Type:         st.Type,
+		State:        st.State,
+		Health:       string(st.Health),
+		PID:          st.PID,
+		Port:         st.Port,
+		Uptime:       st.Uptime,
+		RestartCount: st.RestartCount,
+		Command:      ms.spec.Service.Command,
+		Image:        ms.spec.Service.Image,
+		Env:          ms.spec.Env,
+		Routing:      ms.spec.Routing,
+		HealthCheck:  ms.spec.Health,
+		Dependencies: ms.spec.Dependencies,
+		Restart:      ms.spec.Restart,
+		SpecHash:     ms.specHash,
+	}
+
+	// Resolve secrets from keychain
+	if ms.secrets != nil && len(ms.spec.Secrets) > 0 {
+		si.Secrets = make(map[string]string, len(ms.spec.Secrets))
+		for envVar, ref := range ms.spec.Secrets {
+			val, err := ms.secrets.Get(ref.Keychain)
+			if err != nil {
+				si.Secrets[envVar] = fmt.Sprintf("<error: %v>", err)
+				continue
+			}
+			si.Secrets[envVar] = val
+		}
+	}
+
+	return si
 }
 
 // supervisionPhase represents a phase in the service supervision lifecycle.
