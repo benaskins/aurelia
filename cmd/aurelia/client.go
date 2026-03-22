@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -448,6 +449,121 @@ var reloadCmd = &cobra.Command{
 }
 
 // logs command
+var inspectCmd = &cobra.Command{
+	Use:   "inspect <service>",
+	Short: "Show full resolved config and runtime state for a service",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+		remote, err := resolveNodeClient(cmd)
+		if err != nil {
+			return err
+		}
+
+		var si daemon.ServiceInspect
+		if remote != nil {
+			raw, err := remote.Inspect(args[0])
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal(raw, &si); err != nil {
+				return fmt.Errorf("decoding inspect response: %w", err)
+			}
+		} else {
+			if err := apiGet("/v1/services/"+args[0]+"/inspect", &si); err != nil {
+				return err
+			}
+		}
+
+		if jsonOut {
+			return printJSON(si)
+		}
+
+		printInspect(si)
+		return nil
+	},
+}
+
+func printInspect(si daemon.ServiceInspect) {
+	fmt.Printf("Service:      %s\n", si.Name)
+	fmt.Printf("Type:         %s\n", si.Type)
+	fmt.Printf("State:        %s\n", si.State)
+	fmt.Printf("Health:       %s\n", si.Health)
+	if si.PID != 0 {
+		fmt.Printf("PID:          %d\n", si.PID)
+	}
+	if si.Port != 0 {
+		fmt.Printf("Port:         %d\n", si.Port)
+	}
+	if si.Uptime != "" {
+		fmt.Printf("Uptime:       %s\n", si.Uptime)
+	}
+	fmt.Printf("Restarts:     %d\n", si.RestartCount)
+
+	if si.Command != "" {
+		fmt.Printf("\nCommand:      %s\n", si.Command)
+	}
+	if si.Image != "" {
+		fmt.Printf("\nImage:        %s\n", si.Image)
+	}
+
+	if si.Routing != nil {
+		fmt.Println("\nRouting:")
+		fmt.Printf("  Hostname:   %s\n", si.Routing.Hostname)
+		fmt.Printf("  TLS:        %v\n", si.Routing.TLS)
+	}
+
+	if si.Dependencies != nil {
+		fmt.Println("\nDependencies:")
+		if len(si.Dependencies.After) > 0 {
+			fmt.Printf("  After:      %s\n", strings.Join(si.Dependencies.After, ", "))
+		}
+		if len(si.Dependencies.Requires) > 0 {
+			fmt.Printf("  Requires:   %s\n", strings.Join(si.Dependencies.Requires, ", "))
+		}
+	}
+
+	if len(si.Env) > 0 {
+		fmt.Println("\nEnv:")
+		for k, v := range si.Env {
+			fmt.Printf("  %-20s %s\n", k, v)
+		}
+	}
+
+	if len(si.Secrets) > 0 {
+		fmt.Println("\nSecrets:")
+		for k, v := range si.Secrets {
+			fmt.Printf("  %-20s %s\n", k, v)
+		}
+	}
+
+	if si.HealthCheck != nil {
+		fmt.Println("\nHealth Check:")
+		fmt.Printf("  Type:       %s\n", si.HealthCheck.Type)
+		if si.HealthCheck.Path != "" {
+			fmt.Printf("  Path:       %s\n", si.HealthCheck.Path)
+		}
+		fmt.Printf("  Interval:   %s\n", si.HealthCheck.Interval.Duration)
+		fmt.Printf("  Timeout:    %s\n", si.HealthCheck.Timeout.Duration)
+	}
+
+	if si.Restart != nil {
+		fmt.Println("\nRestart:")
+		fmt.Printf("  Policy:     %s\n", si.Restart.Policy)
+		if si.Restart.MaxAttempts > 0 {
+			fmt.Printf("  Max:        %d\n", si.Restart.MaxAttempts)
+		}
+		fmt.Printf("  Delay:      %s\n", si.Restart.Delay.Duration)
+		if si.Restart.Backoff != "" {
+			fmt.Printf("  Backoff:    %s\n", si.Restart.Backoff)
+		}
+	}
+
+	if si.SpecHash != "" {
+		fmt.Printf("\nSpec Hash:    %s\n", si.SpecHash)
+	}
+}
+
 var logsCmd = &cobra.Command{
 	Use:   "logs <service>",
 	Short: "Show recent log output for a service",
@@ -491,6 +607,7 @@ func init() {
 	deployCmd.Flags().String("drain", "5s", "drain period before stopping old instance")
 
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(inspectCmd)
 	rootCmd.AddCommand(upCmd)
 	rootCmd.AddCommand(downCmd)
 	rootCmd.AddCommand(restartCmd)
