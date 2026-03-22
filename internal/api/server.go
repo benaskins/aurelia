@@ -50,6 +50,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	mux.HandleFunc("POST /v1/services/{name}/stop", s.stopService)
 	mux.HandleFunc("POST /v1/services/{name}/restart", s.restartService)
 	mux.HandleFunc("POST /v1/services/{name}/deploy", s.deployService)
+	mux.HandleFunc("POST /v1/services/{name}/ship", s.shipService)
 	mux.HandleFunc("GET /v1/services/{name}/logs", s.serviceLogs)
 	mux.HandleFunc("POST /v1/reload", s.reload)
 	mux.HandleFunc("GET /v1/gpu", s.gpuInfo)
@@ -272,6 +273,22 @@ func (s *Server) deployService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deployed"})
+}
+
+func (s *Server) shipService(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	s.logger.Info("ship request", "service", name)
+	result, err := s.daemon.ShipService(name)
+	if err != nil {
+		s.logger.Error("shipService: failed", "service", name, "error", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errorMessage("ship failed", err, r)})
+		return
+	}
+	status := http.StatusOK
+	if !result.Success {
+		status = http.StatusUnprocessableEntity
+	}
+	writeJSON(w, status, result)
 }
 
 func (s *Server) serviceLogs(w http.ResponseWriter, r *http.Request) {

@@ -94,6 +94,21 @@ func (c *Client) Logs(name string, n int) ([]string, error) {
 	return resp.Lines, nil
 }
 
+// Ship triggers the fetch → build → deploy → notify pipeline on the remote daemon.
+func (c *Client) Ship(name string) (json.RawMessage, error) {
+	body, err := c.postReturnBody("/v1/services/" + name + "/ship")
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+
+	data, err := io.ReadAll(io.LimitReader(body, 10<<20))
+	if err != nil {
+		return nil, fmt.Errorf("reading ship result from %s: %w", c.Name, err)
+	}
+	return json.RawMessage(data), nil
+}
+
 // Inspect returns the raw JSON inspect response for a service on the remote daemon.
 func (c *Client) Inspect(name string) (json.RawMessage, error) {
 	body, err := c.get("/v1/services/" + name + "/inspect")
@@ -173,6 +188,27 @@ func (c *Client) post(path string) error {
 	}
 
 	return nil
+}
+
+func (c *Client) postReturnBody(path string) (io.ReadCloser, error) {
+	req, err := http.NewRequest("POST", "http://"+c.addr+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request for %s: %w", c.Name, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to %s (%s): %w", c.Name, c.addr, err)
+	}
+
+	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusUnprocessableEntity {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		return nil, fmt.Errorf("%s returned %d: %s", c.Name, resp.StatusCode, body)
+	}
+
+	return resp.Body, nil
 }
 
 func (c *Client) postJSON(path string, v any) (io.ReadCloser, error) {

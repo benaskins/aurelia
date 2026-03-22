@@ -449,6 +449,88 @@ var reloadCmd = &cobra.Command{
 }
 
 // logs command
+var shipCmd = &cobra.Command{
+	Use:   "ship <service>",
+	Short: "Fetch, build, deploy, and notify for a service",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		jsonOut, _ := cmd.Flags().GetBool("json")
+		remote, err := resolveNodeClient(cmd)
+		if err != nil {
+			return err
+		}
+
+		var result daemon.ShipResult
+		if remote != nil {
+			raw, err := remote.Ship(args[0])
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal(raw, &result); err != nil {
+				return fmt.Errorf("decoding ship result: %w", err)
+			}
+		} else {
+			r, err := apiShip(args[0])
+			if err != nil {
+				return err
+			}
+			result = *r
+		}
+
+		if jsonOut {
+			return printJSON(result)
+		}
+
+		printShipResult(result)
+		if !result.Success {
+			return fmt.Errorf("ship failed")
+		}
+		return nil
+	},
+}
+
+func apiShip(name string) (*daemon.ShipResult, error) {
+	client, err := apiClient()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Post("http://aurelia/v1/services/"+name+"/ship", "application/json", nil)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to daemon: %w (is aurelia daemon running?)", err)
+	}
+	defer resp.Body.Close()
+
+	var result daemon.ShipResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return &result, nil
+}
+
+func printShipResult(r daemon.ShipResult) {
+	fmt.Printf("Shipping %s\n\n", r.Service)
+	for _, step := range r.Steps {
+		icon := "✓"
+		if step.Status == "failed" {
+			icon = "✗"
+		} else if step.Status == "skipped" {
+			icon = "–"
+		}
+		fmt.Printf("  %s %-8s %s\n", icon, step.Name, step.Duration)
+		if step.Status == "failed" && step.Output != "" {
+			for _, line := range strings.Split(step.Output, "\n") {
+				fmt.Printf("    %s\n", line)
+			}
+		}
+	}
+	fmt.Println()
+	if r.Success {
+		fmt.Printf("Shipped %s successfully\n", r.Service)
+	} else {
+		fmt.Printf("Ship failed for %s\n", r.Service)
+	}
+}
+
 var inspectCmd = &cobra.Command{
 	Use:   "inspect <service>",
 	Short: "Show full resolved config and runtime state for a service",
@@ -608,6 +690,7 @@ func init() {
 
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(inspectCmd)
+	rootCmd.AddCommand(shipCmd)
 	rootCmd.AddCommand(upCmd)
 	rootCmd.AddCommand(downCmd)
 	rootCmd.AddCommand(restartCmd)

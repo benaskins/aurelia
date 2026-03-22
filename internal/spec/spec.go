@@ -34,13 +34,20 @@ type ServiceSpec struct {
 }
 
 type Service struct {
-	Name        string `yaml:"name"`
-	Type        string `yaml:"type"`                   // "native" | "container" | "external" | "remote"
-	Command     string `yaml:"command,omitempty"`      // native only
-	WorkingDir  string `yaml:"working_dir,omitempty"`  // native only
-	Image       string `yaml:"image,omitempty"`        // container only
-	NetworkMode string `yaml:"network_mode,omitempty"` // container only, default "host"
-	Privileged  bool   `yaml:"privileged,omitempty"`   // container only
+	Name        string  `yaml:"name"`
+	Type        string  `yaml:"type"`                   // "native" | "container" | "external" | "remote"
+	Command     string  `yaml:"command,omitempty"`      // native only
+	WorkingDir  string  `yaml:"working_dir,omitempty"`  // native only
+	Image       string  `yaml:"image,omitempty"`        // container only
+	NetworkMode string  `yaml:"network_mode,omitempty"` // container only, default "host"
+	Privileged  bool    `yaml:"privileged,omitempty"`   // container only
+	Source      *Source `yaml:"source,omitempty"`        // optional: where to fetch and build
+}
+
+// Source describes where a service's source code lives and how to build it.
+type Source struct {
+	Repo  string `yaml:"repo" json:"repo"`   // directory to cd into and git pull --rebase
+	Build string `yaml:"build" json:"build"` // shell command to build the binary
 }
 
 type Network struct {
@@ -118,6 +125,10 @@ func (d Duration) MarshalYAML() (any, error) {
 func (s *ServiceSpec) ExpandEnv() {
 	s.Service.Command = os.ExpandEnv(s.Service.Command)
 	s.Service.WorkingDir = os.ExpandEnv(s.Service.WorkingDir)
+	if s.Service.Source != nil {
+		s.Service.Source.Repo = os.ExpandEnv(s.Service.Source.Repo)
+		s.Service.Source.Build = os.ExpandEnv(s.Service.Source.Build)
+	}
 	if s.Hooks != nil {
 		s.Hooks.Start = os.ExpandEnv(s.Hooks.Start)
 		s.Hooks.Stop = os.ExpandEnv(s.Hooks.Stop)

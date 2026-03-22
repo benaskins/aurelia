@@ -50,6 +50,7 @@ type ServiceInspect struct {
 	HealthCheck  *spec.HealthCheck   `json:"health_check,omitempty"`
 	Dependencies *spec.Dependencies  `json:"dependencies,omitempty"`
 	Restart      *spec.RestartPolicy `json:"restart,omitempty"`
+	Source       *spec.Source        `json:"source,omitempty"`
 	SpecHash     string              `json:"spec_hash,omitempty"`
 }
 
@@ -330,6 +331,7 @@ func (ms *ManagedService) Inspect() ServiceInspect {
 		HealthCheck:  ms.spec.Health,
 		Dependencies: ms.spec.Dependencies,
 		Restart:      ms.spec.Restart,
+		Source:       ms.spec.Service.Source,
 		SpecHash:     ms.specHash,
 	}
 
