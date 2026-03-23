@@ -21,12 +21,14 @@ type ConfirmFunc func(action, service, reason string) bool
 // ReadTools returns the read-only diagnostic tools (no confirmation needed).
 func ReadTools(client APIClient) map[string]tool.ToolDef {
 	return map[string]tool.ToolDef{
-		"list_services":    listServicesTool(client),
-		"get_service":      getServiceTool(client),
-		"inspect_service":  inspectServiceTool(client),
-		"get_logs":         getLogsTool(client),
-		"get_gpu":          getGPUTool(client),
-		"cluster_services": clusterServicesTool(client),
+		"list_services":          listServicesTool(client),
+		"get_service":            getServiceTool(client),
+		"inspect_service":        inspectServiceTool(client),
+		"get_logs":               getLogsTool(client),
+		"get_gpu":                getGPUTool(client),
+		"cluster_services":       clusterServicesTool(client),
+		"test_health_check":      testHealthCheckTool(client),
+		"get_health_check_history": getHealthCheckHistoryTool(client),
 	}
 }
 
@@ -174,6 +176,42 @@ func clusterServicesTool(client APIClient) tool.ToolDef {
 		},
 		Execute: func(ctx *tool.ToolContext, args map[string]any) tool.ToolResult {
 			return tool.ToolResult{Content: apiGet(client, "/v1/cluster/services")}
+		},
+	}
+}
+
+func testHealthCheckTool(client APIClient) tool.ToolDef {
+	return tool.ToolDef{
+		Name:        "test_health_check",
+		Description: "Trigger a health check for a service and return the detailed result including current status and recent check history with timestamps, latency, and errors.",
+		Parameters: tool.ParameterSchema{
+			Type:     "object",
+			Required: []string{"name"},
+			Properties: map[string]tool.PropertySchema{
+				"name": {Type: "string", Description: "Name of the service"},
+			},
+		},
+		Execute: func(ctx *tool.ToolContext, args map[string]any) tool.ToolResult {
+			name, _ := args["name"].(string)
+			return tool.ToolResult{Content: apiGet(client, "/v1/services/"+name+"/health")}
+		},
+	}
+}
+
+func getHealthCheckHistoryTool(client APIClient) tool.ToolDef {
+	return tool.ToolDef{
+		Name:        "get_health_check_history",
+		Description: "Get recent health check history for a service showing timestamps, pass/fail status, latency, and error messages for the last 50 checks.",
+		Parameters: tool.ParameterSchema{
+			Type:     "object",
+			Required: []string{"name"},
+			Properties: map[string]tool.PropertySchema{
+				"name": {Type: "string", Description: "Name of the service"},
+			},
+		},
+		Execute: func(ctx *tool.ToolContext, args map[string]any) tool.ToolResult {
+			name, _ := args["name"].(string)
+			return tool.ToolResult{Content: apiGet(client, "/v1/services/"+name+"/health")}
 		},
 	}
 }

@@ -34,7 +34,7 @@ func TestReadToolsReturnsAllTools(t *testing.T) {
 	client := setupTestAPI(t, http.NotFoundHandler())
 	tools := ReadTools(client)
 
-	expected := []string{"list_services", "get_service", "inspect_service", "get_logs", "get_gpu", "cluster_services"}
+	expected := []string{"list_services", "get_service", "inspect_service", "get_logs", "get_gpu", "cluster_services", "test_health_check", "get_health_check_history"}
 	for _, name := range expected {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("missing tool %q", name)
@@ -63,8 +63,8 @@ func TestAllToolsCombinesReadAndAction(t *testing.T) {
 	client := setupTestAPI(t, http.NotFoundHandler())
 	tools := AllTools(client, nil)
 
-	if len(tools) != 9 {
-		t.Errorf("got %d tools, want 9", len(tools))
+	if len(tools) != 11 {
+		t.Errorf("got %d tools, want 11", len(tools))
 	}
 }
 
@@ -300,6 +300,39 @@ func TestAPICallError(t *testing.T) {
 	}
 	if _, ok := got["error"]; !ok {
 		t.Error("expected error field in response")
+	}
+}
+
+func TestHealthCheckTools(t *testing.T) {
+	t.Parallel()
+
+	healthResp := map[string]any{
+		"status": "healthy",
+		"history": []map[string]any{
+			{"timestamp": "2026-03-23T10:00:00Z", "status": "healthy", "latency": 1500000},
+			{"timestamp": "2026-03-23T10:00:30Z", "status": "unhealthy", "latency": 5000000000, "error": "connection refused"},
+		},
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/services/chat/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(healthResp)
+	})
+
+	client := setupTestAPI(t, mux)
+	tools := ReadTools(client)
+
+	// test_health_check
+	result := tools["test_health_check"].Execute(nil, map[string]any{"name": "chat"})
+	if !contains(result.Content, "healthy") {
+		t.Errorf("test_health_check: expected 'healthy' in result, got %q", result.Content)
+	}
+
+	// get_health_check_history
+	result = tools["get_health_check_history"].Execute(nil, map[string]any{"name": "chat"})
+	if !contains(result.Content, "connection refused") {
+		t.Errorf("get_health_check_history: expected error detail in result, got %q", result.Content)
 	}
 }
 
