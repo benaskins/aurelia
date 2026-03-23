@@ -3,52 +3,26 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
 
-	"github.com/benaskins/aurelia/internal/audit"
-	"github.com/benaskins/aurelia/internal/keychain"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
-func newAuditedStore() (*keychain.AuditedStore, error) {
-	dir, err := aureliaHome()
-	if err != nil {
-		return nil, fmt.Errorf("finding aurelia home: %w", err)
-	}
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, fmt.Errorf("creating directory: %w", err)
-	}
-
-	auditLog, err := audit.NewLogger(filepath.Join(dir, "audit.log"))
-	if err != nil {
-		return nil, err
-	}
-
-	meta, err := keychain.NewMetadataStore(filepath.Join(dir, "secret-metadata.json"))
-	if err != nil {
-		return nil, err
-	}
-
-	inner := keychain.NewSystemStore()
-	return keychain.NewAuditedStore(inner, auditLog, meta, "cli"), nil
-}
-
 var secretCmd = &cobra.Command{
 	Use:   "secret",
-	Short: "Manage secrets in macOS Keychain",
+	Short: "Manage secrets (OpenBao or macOS Keychain)",
 }
 
 var secretSetCmd = &cobra.Command{
 	Use:   "set <key> [value]",
-	Short: "Store a secret in the Keychain",
+	Short: "Store a secret",
 	Long:  "Store a secret. If value is omitted, reads from stdin (useful for piping).",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store, err := newAuditedStore()
+		store, err := newSecretStore("cli")
 		if err != nil {
 			return err
 		}
@@ -85,10 +59,10 @@ var secretSetCmd = &cobra.Command{
 
 var secretGetCmd = &cobra.Command{
 	Use:   "get <key>",
-	Short: "Retrieve a secret from the Keychain",
+	Short: "Retrieve a secret",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store, err := newAuditedStore()
+		store, err := newSecretStore("cli")
 		if err != nil {
 			return err
 		}
@@ -115,7 +89,7 @@ var secretListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
 
-		store, err := newAuditedStore()
+		store, err := newSecretStore("cli")
 		if err != nil {
 			return err
 		}
@@ -181,11 +155,11 @@ var secretListCmd = &cobra.Command{
 
 var secretDeleteCmd = &cobra.Command{
 	Use:     "delete <key>",
-	Short:   "Remove a secret from the Keychain",
+	Short:   "Remove a secret",
 	Aliases: []string{"rm"},
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store, err := newAuditedStore()
+		store, err := newSecretStore("cli")
 		if err != nil {
 			return err
 		}
@@ -207,7 +181,7 @@ var secretRotateCmd = &cobra.Command{
 			return fmt.Errorf("--command is required (rotation command that outputs new value to stdout)")
 		}
 
-		store, err := newAuditedStore()
+		store, err := newSecretStore("cli")
 		if err != nil {
 			return err
 		}

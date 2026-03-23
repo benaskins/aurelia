@@ -46,14 +46,38 @@ func (t *TLS) Configured() bool {
 	return t != nil && t.Cert != "" && t.Key != "" && t.CA != ""
 }
 
+// OpenBao configures the OpenBao secrets backend.
+type OpenBao struct {
+	Addr       string `yaml:"addr"`
+	TokenFile  string `yaml:"token_file"`
+	Mount      string `yaml:"mount"`
+	UnsealFile string `yaml:"unseal_file,omitempty"`
+}
+
+// LoadToken reads the OpenBao token from the configured file,
+// falling back to the BAO_TOKEN environment variable.
+func (o OpenBao) LoadToken() (string, error) {
+	if o.TokenFile != "" {
+		data, err := os.ReadFile(o.TokenFile)
+		if err == nil {
+			return strings.TrimSpace(string(data)), nil
+		}
+	}
+	if t := os.Getenv("BAO_TOKEN"); t != "" {
+		return t, nil
+	}
+	return "", fmt.Errorf("no openbao token: set token_file in config or BAO_TOKEN env var")
+}
+
 // Config holds persistent daemon configuration loaded from ~/.aurelia/config.yaml.
 type Config struct {
-	RoutingOutput string `yaml:"routing_output"`
-	APIAddr       string `yaml:"api_addr"`
-	NodeName      string `yaml:"node_name,omitempty"`
-	Nodes         []Node `yaml:"nodes,omitempty"`
-	LaminaRoot    string `yaml:"lamina_root,omitempty"`
-	TLS           *TLS   `yaml:"tls,omitempty"`
+	RoutingOutput string   `yaml:"routing_output"`
+	APIAddr       string   `yaml:"api_addr"`
+	NodeName      string   `yaml:"node_name,omitempty"`
+	Nodes         []Node   `yaml:"nodes,omitempty"`
+	LaminaRoot    string   `yaml:"lamina_root,omitempty"`
+	TLS           *TLS     `yaml:"tls,omitempty"`
+	OpenBao       *OpenBao `yaml:"openbao,omitempty"`
 }
 
 // FindNode returns the node with the given name, or false if not found.

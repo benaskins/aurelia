@@ -73,8 +73,19 @@ type RestartPolicy struct {
 	MaxDelay    Duration `yaml:"max_delay,omitempty"`
 }
 
+// SecretRef identifies a secret in the configured secrets backend.
+// The Secret field is preferred; Keychain is deprecated but still supported.
 type SecretRef struct {
-	Keychain string `yaml:"keychain"`
+	Secret   string `yaml:"secret,omitempty"`
+	Keychain string `yaml:"keychain,omitempty"`
+}
+
+// Key returns the secret key, preferring the new field over the deprecated one.
+func (r SecretRef) Key() string {
+	if r.Secret != "" {
+		return r.Secret
+	}
+	return r.Keychain
 }
 
 type Routing struct {

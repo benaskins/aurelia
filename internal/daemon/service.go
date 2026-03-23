@@ -666,12 +666,12 @@ func (ms *ManagedService) buildEnvWithPort(port int) []string {
 		env = append(env, k+"="+v)
 	}
 
-	// Resolve secrets from Keychain and inject as env vars
+	// Resolve secrets and inject as env vars
 	if ms.secrets != nil && len(ms.spec.Secrets) > 0 {
 		for envVar, ref := range ms.spec.Secrets {
-			val, err := ms.secrets.Get(ref.Keychain)
+			val, err := ms.secrets.Get(ref.Key())
 			if err != nil {
-				ms.logger.Warn("secret not found, skipping", "env_var", envVar, "keychain_key", ref.Keychain, "error", err)
+				ms.logger.Warn("secret not found, skipping", "env_var", envVar, "secret_key", ref.Key(), "error", err)
 				continue
 			}
 			env = append(env, envVar+"="+val)
