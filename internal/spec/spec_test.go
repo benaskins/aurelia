@@ -3,6 +3,7 @@ package spec
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1062,6 +1063,38 @@ func TestInterpolateRuntimeVars(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestValidateOneshotPolicyValid(t *testing.T) {
+	t.Parallel()
+	spec := &ServiceSpec{
+		Service: Service{Name: "test", Type: "native", Command: "orbctl start"},
+		Restart: &RestartPolicy{Policy: "oneshot"},
+		Health: &HealthCheck{
+			Type:     "exec",
+			Command:  "orbctl status",
+			Interval: Duration{10 * time.Second},
+			Timeout:  Duration{5 * time.Second},
+		},
+	}
+	if err := spec.Validate(); err != nil {
+		t.Errorf("expected oneshot with health to be valid, got: %v", err)
+	}
+}
+
+func TestValidateOneshotPolicyRequiresHealth(t *testing.T) {
+	t.Parallel()
+	spec := &ServiceSpec{
+		Service: Service{Name: "test", Type: "native", Command: "orbctl start"},
+		Restart: &RestartPolicy{Policy: "oneshot"},
+	}
+	err := spec.Validate()
+	if err == nil {
+		t.Fatal("expected error for oneshot without health check")
+	}
+	if !strings.Contains(err.Error(), "health") {
+		t.Errorf("error should mention health, got: %v", err)
 	}
 }
 

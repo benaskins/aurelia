@@ -401,8 +401,12 @@ func (s *ServiceSpec) Validate() error {
 		switch r.Policy {
 		case "always", "on-failure", "never":
 			// ok
+		case "oneshot":
+			if s.Health == nil {
+				return fmt.Errorf("health block is required for oneshot restart policy")
+			}
 		default:
-			return fmt.Errorf("restart.policy must be \"always\", \"on-failure\", or \"never\", got %q", r.Policy)
+			return fmt.Errorf("restart.policy must be \"always\", \"on-failure\", \"never\", or \"oneshot\", got %q", r.Policy)
 		}
 
 		if r.Backoff != "" {
