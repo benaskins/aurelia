@@ -117,6 +117,32 @@ func (c *Client) StatusContext(ctx context.Context) (json.RawMessage, error) {
 	return json.RawMessage(data), nil
 }
 
+// GraphContext returns the service graph from the remote daemon.
+func (c *Client) GraphContext(ctx context.Context) (json.RawMessage, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.scheme+"://"+c.addr+"/v1/graph", nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request for %s: %w", c.Name, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to %s (%s): %w", c.Name, c.addr, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return nil, fmt.Errorf("%s returned %d: %s", c.Name, resp.StatusCode, body)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	if err != nil {
+		return nil, fmt.Errorf("reading graph from %s: %w", c.Name, err)
+	}
+	return json.RawMessage(data), nil
+}
+
 // StartService starts a service on the remote daemon.
 func (c *Client) StartService(name string) error {
 	return c.post("/v1/services/" + name + "/start")

@@ -477,15 +477,16 @@ func (d *Daemon) ServiceDeps(name string) (ServiceDeps, error) {
 
 // GraphNode represents a service in the full dependency graph.
 type GraphNode struct {
-	Name         string       `json:"name"`
-	Type         string       `json:"type"`
-	State        driver.State `json:"state"`
+	Name         string        `json:"name"`
+	Type         string        `json:"type"`
+	State        driver.State  `json:"state"`
 	Health       health.Status `json:"health"`
-	Port         int          `json:"port,omitempty"`
-	Uptime       string       `json:"uptime,omitempty"`
-	RestartCount int          `json:"restart_count"`
-	After        []string     `json:"after"`
-	Requires     []string     `json:"requires"`
+	Port         int           `json:"port,omitempty"`
+	Uptime       string        `json:"uptime,omitempty"`
+	RestartCount int           `json:"restart_count"`
+	After        []string      `json:"after"`
+	Requires     []string      `json:"requires"`
+	Node         string        `json:"node,omitempty"`
 }
 
 // ServiceGraph returns all services with their state and dependency edges.

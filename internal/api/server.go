@@ -79,6 +79,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 
 	// Cluster endpoints — aggregate across peers
 	mux.HandleFunc("GET /v1/cluster/services", s.clusterListServices)
+	mux.HandleFunc("GET /v1/cluster/graph", s.clusterGraph)
 	mux.HandleFunc("POST /v1/cluster/services/{name}/{action}", s.clusterServiceAction)
 
 	// Lamina workspace CLI execution
@@ -735,6 +736,82 @@ func (s *Server) clusterListServices(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"services": allStates,
 		"peers":    peerStatus,
+	})
+}
+
+func (s *Server) clusterGraph(w http.ResponseWriter, r *http.Request) {
+	// Get local graph and stamp node name
+	localNodes := s.daemon.ServiceGraph()
+	nodeName := s.nodeName
+	if nodeName == "" {
+		nodeName = "local"
+	}
+	for i := range localNodes {
+		localNodes[i].Node = nodeName
+	}
+
+	allNodes := localNodes
+
+	// Fan out to reachable peers
+	ctx, cancel := context.WithTimeout(r.Context(), clusterAggregationTimeout)
+	defer cancel()
+
+	peers := s.daemon.Peers()
+	peerReachable := s.daemon.PeerStates()
+	peerStatus := make(map[string]string)
+
+	type peerResult struct {
+		name  string
+		nodes []daemon.GraphNode
+		err   error
+	}
+	results := make(chan peerResult, len(peers))
+
+	expected := 0
+	for name, c := range peers {
+		if !peerReachable[name] {
+			peerStatus[name] = "unreachable"
+			continue
+		}
+		expected++
+		go func(name string, c *node.Client) {
+			raw, err := c.GraphContext(ctx)
+			if err != nil {
+				results <- peerResult{name: name, err: err}
+				return
+			}
+			var nodes []daemon.GraphNode
+			if err := json.Unmarshal(raw, &nodes); err != nil {
+				results <- peerResult{name: name, err: fmt.Errorf("decoding %s: %w", name, err)}
+				return
+			}
+			for i := range nodes {
+				if nodes[i].Node == "" {
+					nodes[i].Node = name
+				}
+			}
+			results <- peerResult{name: name, nodes: nodes}
+		}(name, c)
+	}
+
+	for i := 0; i < expected; i++ {
+		res := <-results
+		if res.err != nil {
+			if ctx.Err() != nil {
+				peerStatus[res.name] = "timeout"
+			} else {
+				peerStatus[res.name] = "error"
+			}
+			s.logger.Warn("failed to get peer graph", "peer", res.name, "error", res.err)
+			continue
+		}
+		peerStatus[res.name] = "ok"
+		allNodes = append(allNodes, res.nodes...)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"nodes": allNodes,
+		"peers": peerStatus,
 	})
 }
 

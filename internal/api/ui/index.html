@@ -499,7 +499,7 @@
 
     // Layout & render
     function renderGraph(nodes) {
-      const g = new dagre.graphlib.Graph();
+      const g = new dagre.graphlib.Graph({ compound: true });
       g.setGraph({
         rankdir: 'TB',
         nodesep: 40,
@@ -510,23 +510,46 @@
       g.setDefaultEdgeLabel(() => ({}));
 
       const nodeW = 140;
-      const nodeH = 48;
+      const nodeH = 56;
+
+      // Create cluster groups per node
+      const nodeNames = new Set(nodes.map(n => n.node || 'local'));
+      nodeNames.forEach(name => {
+        g.setNode('cluster_' + name, { label: name, clusterLabelPos: 'top' });
+      });
 
       nodes.forEach(n => {
-        g.setNode(n.name, { width: nodeW, height: nodeH, service: n });
+        const key = (n.node || 'local') + '/' + n.name;
+        g.setNode(key, { width: nodeW, height: nodeH, service: n });
+        g.setParent(key, 'cluster_' + (n.node || 'local'));
       });
 
       // Build edges: requires (solid) and after (dashed)
-      const nodeNames = new Set(nodes.map(n => n.name));
+      // Build lookup: for each node name on each host, find the compound key
+      const keysByName = {};
       nodes.forEach(n => {
+        const key = (n.node || 'local') + '/' + n.name;
+        if (!keysByName[n.name]) keysByName[n.name] = [];
+        keysByName[n.name].push({ key, node: n.node || 'local' });
+      });
+
+      nodes.forEach(n => {
+        const srcKey = (n.node || 'local') + '/' + n.name;
+        const srcNode = n.node || 'local';
         (n.requires || []).forEach(dep => {
-          if (nodeNames.has(dep)) {
-            g.setEdge(dep, n.name, { type: 'requires' });
+          // Prefer same-node dep, fallback to any
+          const targets = keysByName[dep] || [];
+          const target = targets.find(t => t.node === srcNode) || targets[0];
+          if (target) {
+            g.setEdge(target.key, srcKey, { type: 'requires' });
           }
         });
         (n.after || []).forEach(dep => {
-          if (nodeNames.has(dep) && !(n.requires || []).includes(dep)) {
-            g.setEdge(dep, n.name, { type: 'after' });
+          if ((n.requires || []).includes(dep)) return;
+          const targets = keysByName[dep] || [];
+          const target = targets.find(t => t.node === srcNode) || targets[0];
+          if (target) {
+            g.setEdge(target.key, srcKey, { type: 'after' });
           }
         });
       });
@@ -568,31 +591,61 @@
         svg += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="1" ${dash} marker-end="${marker}"/>`;
       });
 
+      // Cluster backgrounds
+      nodeNames.forEach(name => {
+        const clusterNode = g.node('cluster_' + name);
+        if (!clusterNode) return;
+        // Dagre doesn't lay out compound nodes with dimensions,
+        // so we compute bounds from children
+        const children = g.children('cluster_' + name) || [];
+        if (children.length === 0) return;
+
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        children.forEach(id => {
+          const n = g.node(id);
+          if (!n) return;
+          minX = Math.min(minX, n.x - nodeW / 2);
+          minY = Math.min(minY, n.y - nodeH / 2);
+          maxX = Math.max(maxX, n.x + nodeW / 2);
+          maxY = Math.max(maxY, n.y + nodeH / 2);
+        });
+
+        const pad = 16;
+        const labelH = 18;
+        svg += `<rect x="${minX - pad}" y="${minY - pad - labelH}" width="${maxX - minX + pad * 2}" height="${maxY - minY + pad * 2 + labelH}" fill="none" stroke="var(--dim)" stroke-width="1" stroke-dasharray="3,3" rx="2"/>`;
+        svg += `<text x="${minX - pad + 8}" y="${minY - pad - 4}" fill="var(--dim)" font-size="8" font-family="'Space Mono', monospace" letter-spacing="0.2em" text-transform="uppercase">${name.toUpperCase()}</text>`;
+      });
+
       // Nodes
       g.nodes().forEach(id => {
         const node = g.node(id);
+        if (!node.service) return; // skip cluster nodes
         const svc = node.service;
         const x = node.x - nodeW / 2;
         const y = node.y - nodeH / 2;
         const color = healthColor(svc.state, svc.health);
         const label = stateLabel(svc.state, svc.health);
         const icon = typeIcon(svc.type);
+        const nodeLabel = svc.node || 'local';
 
-        svg += `<g class="node-group" data-name="${svc.name}" onclick="showDetail('${svc.name}')">`;
+        svg += `<g class="node-group" data-name="${svc.name}" data-node="${nodeLabel}" onclick="showDetail('${nodeLabel}/${svc.name}')">`;
         svg += `<rect x="${x}" y="${y}" width="${nodeW}" height="${nodeH}" fill="var(--bg)" stroke="var(--panel-border)" stroke-width="1"/>`;
 
         // Health dot
-        svg += `<circle cx="${x + 12}" cy="${y + nodeH / 2}" r="4" fill="${color}"/>`;
+        svg += `<circle cx="${x + 12}" cy="${y + 14}" r="4" fill="${color}"/>`;
 
         // Name
-        svg += `<text class="node-name" x="${x + 22}" y="${y + 18}" fill="var(--fg)" font-size="10" font-family="'Space Mono', monospace" letter-spacing="0.06em">${svc.name}</text>`;
+        svg += `<text class="node-name" x="${x + 22}" y="${y + 17}" fill="var(--fg)" font-size="10" font-family="'Space Mono', monospace" letter-spacing="0.06em">${svc.name}</text>`;
 
         // Type + state
-        svg += `<text x="${x + 22}" y="${y + 34}" fill="var(--muted)" font-size="8" font-family="'Space Mono', monospace" letter-spacing="0.04em">${icon} ${svc.type} \u00B7 ${label}</text>`;
+        svg += `<text x="${x + 22}" y="${y + 33}" fill="var(--muted)" font-size="8" font-family="'Space Mono', monospace" letter-spacing="0.04em">${icon} ${svc.type} \u00B7 ${label}</text>`;
+
+        // Node name
+        svg += `<text x="${x + 22}" y="${y + 46}" fill="var(--dim)" font-size="7" font-family="'Space Mono', monospace" letter-spacing="0.08em">${nodeLabel}</text>`;
 
         // Port
         if (svc.port) {
-          svg += `<text x="${x + nodeW - 8}" y="${y + 18}" fill="var(--dim)" font-size="8" font-family="'Space Mono', monospace" text-anchor="end">:${svc.port}</text>`;
+          svg += `<text x="${x + nodeW - 8}" y="${y + 17}" fill="var(--dim)" font-size="8" font-family="'Space Mono', monospace" text-anchor="end">:${svc.port}</text>`;
         }
 
         svg += `</g>`;
@@ -603,9 +656,11 @@
     }
 
     // Detail panel
-    function showDetail(name) {
-      selectedNode = name;
-      const svc = graphData.find(n => n.name === name);
+    // key is "node/name" compound key
+    function showDetail(key) {
+      selectedNode = key;
+      const [nodeId, svcName] = key.split('/');
+      const svc = graphData.find(n => (n.node || 'local') === nodeId && n.name === svcName);
       if (!svc) return;
 
       const color = healthColor(svc.state, svc.health);
@@ -615,6 +670,9 @@
         <div class="detail-header">
           <div class="detail-name">${svc.name}</div>
           <div class="detail-meta">
+            <div class="detail-meta-item">
+              <span class="detail-meta-label">node</span> ${svc.node || 'local'}
+            </div>
             <div class="detail-meta-item">
               <span class="detail-meta-label">type</span> ${svc.type}
             </div>
@@ -639,20 +697,21 @@
         html += `<div class="detail-section">
           <div class="detail-section-title">Dependencies</div>
           <div class="detail-deps-list">
-            ${allDeps.map(d => `<div class="detail-dep-tag ${requires.has(d) ? 'hard' : ''}" onclick="showDetail('${d}')">${d}${requires.has(d) ? ' (hard)' : ''}</div>`).join('')}
+            ${allDeps.map(d => `<div class="detail-dep-tag ${requires.has(d) ? 'hard' : ''}" onclick="showDetail('${nodeId}/${d}')">${d}${requires.has(d) ? ' (hard)' : ''}</div>`).join('')}
           </div>
         </div>`;
       }
 
-      // Dependents (reverse lookup)
+      // Dependents (reverse lookup, same node)
       const dependents = graphData.filter(n =>
-        (n.requires || []).includes(name) || (n.after || []).includes(name)
+        (n.node || 'local') === nodeId &&
+        ((n.requires || []).includes(svcName) || (n.after || []).includes(svcName))
       );
       if (dependents.length > 0) {
         html += `<div class="detail-section">
           <div class="detail-section-title">Depended on by</div>
           <div class="detail-deps-list">
-            ${dependents.map(d => `<div class="detail-dep-tag" onclick="showDetail('${d.name}')">${d.name}</div>`).join('')}
+            ${dependents.map(d => `<div class="detail-dep-tag" onclick="showDetail('${d.node || 'local'}/${d.name}')">${d.name}</div>`).join('')}
           </div>
         </div>`;
       }
@@ -660,10 +719,10 @@
       detailContent.innerHTML = html;
       detailOverlay.classList.add('active');
 
-      // Fetch health and logs in parallel
+      // Fetch health and logs (only works for local services)
       Promise.all([
-        fetch(`/v1/services/${name}/health`).then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch(`/v1/services/${name}/logs?n=30`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`/v1/services/${svcName}/health`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`/v1/services/${svcName}/logs?n=30`).then(r => r.ok ? r.json() : null).catch(() => null),
       ]).then(([healthData, logsData]) => {
         let extra = '';
 
@@ -715,14 +774,20 @@
 
     async function fetchGraph() {
       try {
-        const resp = await fetch('/v1/graph');
+        const resp = await fetch('/v1/cluster/graph');
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
-        graphData = await resp.json();
+        const data = await resp.json();
+        graphData = data.nodes || [];
+        const peers = data.peers || {};
         consecutiveErrors = 0;
 
+        const peerSummary = Object.entries(peers)
+          .map(([name, status]) => `${name}: ${status}`)
+          .join(', ');
+
         statusDot.className = 'dot ok';
-        statusText.textContent = `${graphData.length} services`;
+        statusText.textContent = `${graphData.length} services` + (peerSummary ? ` \u00B7 ${peerSummary}` : '');
 
         renderGraph(graphData);
       } catch (err) {
