@@ -18,6 +18,10 @@ func (c *testAPIClient) Get(path string) (*http.Response, error) {
 	return http.Get(c.server.URL + path)
 }
 
+func (c *testAPIClient) Post(path string) (*http.Response, error) {
+	return http.Post(c.server.URL+path, "application/json", nil)
+}
+
 func setupTestAPI(t *testing.T, handler http.Handler) APIClient {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -25,12 +29,12 @@ func setupTestAPI(t *testing.T, handler http.Handler) APIClient {
 	return &testAPIClient{server: server}
 }
 
-func TestToolsReturnsAllTools(t *testing.T) {
+func TestReadToolsReturnsAllTools(t *testing.T) {
 	t.Parallel()
 	client := setupTestAPI(t, http.NotFoundHandler())
-	tools := Tools(client)
+	tools := ReadTools(client)
 
-	expected := []string{"list_services", "get_service", "inspect_service", "get_logs", "get_gpu"}
+	expected := []string{"list_services", "get_service", "inspect_service", "get_logs", "get_gpu", "cluster_services"}
 	for _, name := range expected {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("missing tool %q", name)
@@ -38,6 +42,29 @@ func TestToolsReturnsAllTools(t *testing.T) {
 	}
 	if len(tools) != len(expected) {
 		t.Errorf("got %d tools, want %d", len(tools), len(expected))
+	}
+}
+
+func TestActionToolsReturnsAllActions(t *testing.T) {
+	t.Parallel()
+	client := setupTestAPI(t, http.NotFoundHandler())
+	tools := ActionTools(client, nil)
+
+	expected := []string{"restart_service", "start_service", "stop_service"}
+	for _, name := range expected {
+		if _, ok := tools[name]; !ok {
+			t.Errorf("missing action tool %q", name)
+		}
+	}
+}
+
+func TestAllToolsCombinesReadAndAction(t *testing.T) {
+	t.Parallel()
+	client := setupTestAPI(t, http.NotFoundHandler())
+	tools := AllTools(client, nil)
+
+	if len(tools) != 9 {
+		t.Errorf("got %d tools, want 9", len(tools))
 	}
 }
 
@@ -55,7 +82,7 @@ func TestListServicesTool(t *testing.T) {
 	})
 
 	client := setupTestAPI(t, mux)
-	tools := Tools(client)
+	tools := ReadTools(client)
 	result := tools["list_services"].Execute(&tool.ToolContext{}, nil)
 
 	var got []map[string]any
@@ -77,7 +104,7 @@ func TestGetServiceTool(t *testing.T) {
 	})
 
 	client := setupTestAPI(t, mux)
-	tools := Tools(client)
+	tools := ReadTools(client)
 	result := tools["get_service"].Execute(&tool.ToolContext{}, map[string]any{"name": "chat"})
 
 	var got map[string]any
@@ -99,7 +126,7 @@ func TestGetLogsTool(t *testing.T) {
 	})
 
 	client := setupTestAPI(t, mux)
-	tools := Tools(client)
+	tools := ReadTools(client)
 
 	// Default lines
 	result := tools["get_logs"].Execute(&tool.ToolContext{}, map[string]any{"name": "chat"})
@@ -131,7 +158,7 @@ func TestGetGPUTool(t *testing.T) {
 	})
 
 	client := setupTestAPI(t, mux)
-	tools := Tools(client)
+	tools := ReadTools(client)
 	result := tools["get_gpu"].Execute(&tool.ToolContext{}, nil)
 
 	var got map[string]any
@@ -153,7 +180,7 @@ func TestInspectServiceTool(t *testing.T) {
 	})
 
 	client := setupTestAPI(t, mux)
-	tools := Tools(client)
+	tools := ReadTools(client)
 	result := tools["inspect_service"].Execute(&tool.ToolContext{}, map[string]any{"name": "chat"})
 
 	var got map[string]any
@@ -162,6 +189,95 @@ func TestInspectServiceTool(t *testing.T) {
 	}
 	if got["command"] != "/usr/bin/chat" {
 		t.Errorf("command = %v, want /usr/bin/chat", got["command"])
+	}
+}
+
+func TestClusterServicesTool(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/cluster/services", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"services": []map[string]any{{"name": "chat", "node": "aurelia"}},
+			"peers":    map[string]string{"limen": "ok"},
+		})
+	})
+
+	client := setupTestAPI(t, mux)
+	tools := ReadTools(client)
+	result := tools["cluster_services"].Execute(&tool.ToolContext{}, nil)
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(result.Content), &got); err != nil {
+		t.Fatalf("failed to parse result: %v", err)
+	}
+	if _, ok := got["services"]; !ok {
+		t.Error("expected services field in response")
+	}
+	if _, ok := got["peers"]; !ok {
+		t.Error("expected peers field in response")
+	}
+}
+
+func TestActionToolApproved(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/services/{name}/restart", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "restarting"})
+	})
+
+	client := setupTestAPI(t, mux)
+	confirm := func(action, service, reason string) bool { return true }
+	tools := ActionTools(client, confirm)
+
+	result := tools["restart_service"].Execute(&tool.ToolContext{}, map[string]any{
+		"name":   "chat",
+		"reason": "service is unhealthy",
+	})
+
+	if result.Content == "" {
+		t.Fatal("expected non-empty result")
+	}
+	if !contains(result.Content, "Action executed") {
+		t.Errorf("expected approved result, got: %s", result.Content)
+	}
+}
+
+func TestActionToolRejected(t *testing.T) {
+	t.Parallel()
+	client := setupTestAPI(t, http.NotFoundHandler())
+	confirm := func(action, service, reason string) bool { return false }
+	tools := ActionTools(client, confirm)
+
+	result := tools["restart_service"].Execute(&tool.ToolContext{}, map[string]any{
+		"name":   "chat",
+		"reason": "service is unhealthy",
+	})
+
+	if !contains(result.Content, "rejected") {
+		t.Errorf("expected rejected result, got: %s", result.Content)
+	}
+}
+
+func TestActionToolNilConfirm(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/services/{name}/start", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "starting"})
+	})
+
+	client := setupTestAPI(t, mux)
+	tools := ActionTools(client, nil) // nil confirm = auto-approve
+
+	result := tools["start_service"].Execute(&tool.ToolContext{}, map[string]any{
+		"name":   "auth",
+		"reason": "dependency needed",
+	})
+
+	if !contains(result.Content, "Action executed") {
+		t.Errorf("nil confirm should auto-approve, got: %s", result.Content)
 	}
 }
 
@@ -175,7 +291,7 @@ func TestAPICallError(t *testing.T) {
 	})
 
 	client := setupTestAPI(t, mux)
-	tools := Tools(client)
+	tools := ReadTools(client)
 	result := tools["get_service"].Execute(&tool.ToolContext{}, map[string]any{"name": "nonexistent"})
 
 	var got map[string]any
@@ -187,11 +303,15 @@ func TestAPICallError(t *testing.T) {
 	}
 }
 
-func TestToolDefsReturnsSlice(t *testing.T) {
-	t.Parallel()
-	client := setupTestAPI(t, http.NotFoundHandler())
-	defs := ToolDefs(client)
-	if len(defs) != 5 {
-		t.Errorf("got %d tool defs, want 5", len(defs))
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsSubstring(s, sub))
+}
+
+func containsSubstring(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
 	}
+	return false
 }

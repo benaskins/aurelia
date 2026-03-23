@@ -15,6 +15,8 @@ You have tools to inspect the services aurelia manages. Use them to gather evide
 
 When asked about a specific service, focus there but check dependencies and related services if relevant. When asked for a general review, survey all services and flag anything concerning.
 
+You can propose actions (restart, start, stop) when you've identified a clear issue. The operator will approve or reject each action. If rejected, continue investigating or suggest alternatives.
+
 Key things to look for:
 - Services in failed or unhealthy state
 - High restart counts (suggests crash loops)
@@ -31,12 +33,22 @@ type Engine struct {
 	tools  map[string]tool.ToolDef
 }
 
-// NewEngine creates a diagnostic engine with the given LLM client and API tools.
+// NewEngine creates a diagnostic engine with read-only tools (no actions).
 func NewEngine(client talk.LLMClient, model string, apiClient APIClient) *Engine {
 	return &Engine{
 		client: client,
 		model:  model,
-		tools:  Tools(apiClient),
+		tools:  ReadTools(apiClient),
+	}
+}
+
+// NewEngineWithActions creates a diagnostic engine with both read and action tools.
+// The confirm callback is called before executing any action tool.
+func NewEngineWithActions(client talk.LLMClient, model string, apiClient APIClient, confirm ConfirmFunc) *Engine {
+	return &Engine{
+		client: client,
+		model:  model,
+		tools:  AllTools(apiClient, confirm),
 	}
 }
 
@@ -44,21 +56,7 @@ func NewEngine(client talk.LLMClient, model string, apiClient APIClient) *Engine
 // diagnosis focuses on that service. The onToken callback is called with
 // each streamed token for real-time output.
 func (e *Engine) Diagnose(ctx context.Context, service string, onToken func(string)) (*loop.Result, error) {
-	userMessage := "Review all services and report any concerns."
-	if service != "" {
-		userMessage = fmt.Sprintf("Diagnose the service %q — what is its current state and are there any issues?", service)
-	}
-
-	req := &talk.Request{
-		Model: e.model,
-		Messages: []talk.Message{
-			{Role: talk.RoleSystem, Content: systemPrompt},
-			{Role: talk.RoleUser, Content: userMessage},
-		},
-		Stream:        true,
-		MaxIterations: 10,
-	}
-
+	req := e.buildRequest(service)
 	cfg := loop.RunConfig{
 		Client:  e.client,
 		Request: req,
@@ -68,6 +66,63 @@ func (e *Engine) Diagnose(ctx context.Context, service string, onToken func(stri
 			OnToken: onToken,
 		},
 	}
-
 	return loop.Run(ctx, cfg)
+}
+
+// Stream runs a diagnostic conversation and returns a channel of events
+// for use with a TUI.
+func (e *Engine) Stream(ctx context.Context, service string, messages []talk.Message) <-chan loop.Event {
+	req := e.buildRequestWithMessages(service, messages)
+	cfg := loop.RunConfig{
+		Client:  e.client,
+		Request: req,
+		Tools:   e.tools,
+		ToolCtx: &tool.ToolContext{Ctx: ctx},
+	}
+	return loop.Stream(ctx, cfg)
+}
+
+// Tools returns the engine's tool map (for TUI to pass to axon-loop).
+func (e *Engine) Tools() map[string]tool.ToolDef {
+	return e.tools
+}
+
+// Model returns the configured model name.
+func (e *Engine) Model() string {
+	return e.model
+}
+
+// Client returns the LLM client.
+func (e *Engine) Client() talk.LLMClient {
+	return e.client
+}
+
+func (e *Engine) buildRequest(service string) *talk.Request {
+	messages := []talk.Message{
+		{Role: talk.RoleSystem, Content: systemPrompt},
+		{Role: talk.RoleUser, Content: userMessage(service)},
+	}
+	return e.buildRequestWithMessages(service, messages)
+}
+
+func (e *Engine) buildRequestWithMessages(service string, messages []talk.Message) *talk.Request {
+	toolDefs := make([]tool.ToolDef, 0, len(e.tools))
+	for _, t := range e.tools {
+		toolDefs = append(toolDefs, t)
+	}
+
+	return &talk.Request{
+		Model:         e.model,
+		Messages:      messages,
+		Tools:         toolDefs,
+		Stream:        true,
+		MaxIterations: 10,
+	}
+}
+
+func userMessage(service string) string {
+	if service != "" {
+		return fmt.Sprintf("Diagnose the service %q — what is its current state and are there any issues?", service)
+	}
+	return "Review all services and report any concerns."
 }

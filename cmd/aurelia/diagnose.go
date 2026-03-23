@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	talk "github.com/benaskins/axon-talk"
@@ -64,10 +66,17 @@ func resolveAPIKey(secretName string) (string, error) {
 		return "", fmt.Errorf("api_key_secret not configured")
 	}
 	store, err := newSecretStore("diagnose")
-	if err != nil {
-		return "", err
+	if err == nil {
+		if val, err := store.Get(secretName); err == nil {
+			return val, nil
+		}
 	}
-	return store.Get(secretName)
+	// Fall back to environment variable (uppercase, hyphens to underscores)
+	envKey := strings.ToUpper(strings.ReplaceAll(secretName, "-", "_"))
+	if val := os.Getenv(envKey); val != "" {
+		return val, nil
+	}
+	return "", fmt.Errorf("secret %q not found in store and %s not set in environment", secretName, envKey)
 }
 
 func newLLMClient(provider, apiKey string) (talk.LLMClient, error) {
@@ -105,6 +114,10 @@ type socketAPIClient struct {
 
 func (c *socketAPIClient) Get(path string) (*http.Response, error) {
 	return c.client.Get("http://aurelia" + path)
+}
+
+func (c *socketAPIClient) Post(path string) (*http.Response, error) {
+	return c.client.Post("http://aurelia"+path, "application/json", nil)
 }
 
 func init() {
