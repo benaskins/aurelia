@@ -1162,3 +1162,63 @@ func TestListenTLSRequiresToken(t *testing.T) {
 		t.Fatal("expected error when calling ListenTLS without GenerateToken")
 	}
 }
+
+func TestServiceHealthEndpoint(t *testing.T) {
+	_, client := setupTestServer(t, map[string]string{
+		"svc.yaml": `
+service:
+  name: test-health-svc
+  type: native
+  command: "sleep 30"
+health:
+  type: exec
+  command: "true"
+  interval: 100ms
+  timeout: 5s
+`,
+	})
+
+	// Wait for health checks to run
+	time.Sleep(500 * time.Millisecond)
+
+	resp, err := client.Get("http://aurelia/v1/services/test-health-svc/health")
+	if err != nil {
+		t.Fatalf("GET /v1/services/test-health-svc/health: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Status  string `json:"status"`
+		History []struct {
+			Status  string `json:"status"`
+			Latency int64  `json:"latency"`
+			Error   string `json:"error,omitempty"`
+		} `json:"history"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if result.Status != "healthy" {
+		t.Errorf("expected healthy status, got %q", result.Status)
+	}
+	if len(result.History) == 0 {
+		t.Error("expected health history entries")
+	}
+}
+
+func TestServiceHealth404(t *testing.T) {
+	_, client := setupTestServer(t, nil)
+
+	resp, err := client.Get("http://aurelia/v1/services/nonexistent/health")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 404 {
+		t.Errorf("expected 404, got %d", resp.StatusCode)
+	}
+}

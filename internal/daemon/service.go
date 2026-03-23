@@ -356,6 +356,18 @@ func (ms *ManagedService) Inspect() ServiceInspect {
 	return si
 }
 
+// HealthHistory returns recent health check records from the monitor.
+// Returns nil if no monitor is running.
+func (ms *ManagedService) HealthHistory() []health.CheckRecord {
+	ms.mu.Lock()
+	monitor := ms.monitor
+	ms.mu.Unlock()
+	if monitor == nil {
+		return nil
+	}
+	return monitor.History()
+}
+
 // supervisionPhase represents a phase in the service supervision lifecycle.
 type supervisionPhase int
 

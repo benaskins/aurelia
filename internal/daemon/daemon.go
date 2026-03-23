@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/benaskins/aurelia/internal/driver"
+	"github.com/benaskins/aurelia/internal/health"
 	"github.com/benaskins/aurelia/internal/keychain"
 	"github.com/benaskins/aurelia/internal/node"
 	"github.com/benaskins/aurelia/internal/port"
@@ -432,6 +433,15 @@ func (d *Daemon) InspectService(name string) (ServiceInspect, error) {
 		return ServiceInspect{}, err
 	}
 	return ms.Inspect(), nil
+}
+
+// ServiceHealthHistory returns the recent health check records for a service.
+func (d *Daemon) ServiceHealthHistory(name string) ([]health.CheckRecord, error) {
+	ms, err := d.getService(name)
+	if err != nil {
+		return nil, err
+	}
+	return ms.HealthHistory(), nil
 }
 
 // Reload re-reads specs and reconciles: start new, stop removed, restart changed.

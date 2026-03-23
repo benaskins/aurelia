@@ -21,6 +21,7 @@ import (
 	"github.com/benaskins/aurelia/internal/config"
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/gpu"
+	"github.com/benaskins/aurelia/internal/health"
 	"github.com/benaskins/aurelia/internal/node"
 )
 
@@ -55,6 +56,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/services", s.listServices)
 	mux.HandleFunc("GET /v1/services/{name}/inspect", s.inspectService)
+	mux.HandleFunc("GET /v1/services/{name}/health", s.serviceHealth)
 	mux.HandleFunc("GET /v1/services/{name}", s.getService)
 	mux.HandleFunc("POST /v1/services/{name}/start", s.startService)
 	mux.HandleFunc("POST /v1/services/{name}/stop", s.stopService)
@@ -436,6 +438,25 @@ func (s *Server) inspectService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, inspect)
+}
+
+func (s *Server) serviceHealth(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	state, err := s.daemon.ServiceState(name)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": errorMessage("service not found", err, r)})
+		return
+	}
+	history, _ := s.daemon.ServiceHealthHistory(name)
+
+	type healthResponse struct {
+		Status  string                `json:"status"`
+		History []health.CheckRecord  `json:"history"`
+	}
+	writeJSON(w, http.StatusOK, healthResponse{
+		Status:  string(state.Health),
+		History: history,
+	})
 }
 
 func (s *Server) isExternalGuard(w http.ResponseWriter, name, action string) bool {
