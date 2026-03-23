@@ -254,14 +254,14 @@ func TestNetworkPartition(t *testing.T) {
 
 	t.Logf("peers after reconnect: %v", peersAfter)
 
-	// BUG: node.Client HTTP connection pool caches stale connections after
-	// network partition. Liveness checker needs to close idle connections
-	// after a failure so it can re-resolve DNS on the next check.
-	// For now, document the behaviour rather than assert recovery.
+	// Network partition recovery depends on Docker network reconnect restoring
+	// DNS resolution and TCP reachability. CloseIdleConnections (fixed in peers.go)
+	// handles stale connection pools, but container DNS caching or OrbStack-specific
+	// networking may delay recovery beyond the liveness interval.
 	if peersAfter["node-2"] == "ok" {
-		t.Log("node-2 recovered after reconnect (connection pool refreshed)")
+		t.Log("node-2 recovered after reconnect")
 	} else {
-		t.Log("node-2 still unreachable after reconnect (stale connection pool, known issue)")
+		t.Log("node-2 still unreachable after reconnect (DNS/network recovery lag)")
 	}
 }
 

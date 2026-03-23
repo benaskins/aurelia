@@ -58,6 +58,13 @@ func (c *Client) Health() error {
 	return err
 }
 
+// CloseIdleConnections closes idle HTTP connections in the client's pool.
+// Call after a failed health check to force fresh DNS resolution and TCP
+// connections on the next attempt.
+func (c *Client) CloseIdleConnections() {
+	c.http.CloseIdleConnections()
+}
+
 // Status returns the raw JSON service states from the remote daemon.
 // Callers decode into their own type to avoid import cycles.
 func (c *Client) Status() (json.RawMessage, error) {

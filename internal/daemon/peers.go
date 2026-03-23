@@ -93,6 +93,11 @@ func (d *Daemon) checkPeerLiveness() {
 		d.peerStatus[name] = err == nil
 		d.mu.Unlock()
 		if err != nil {
+			// Close idle connections so the next check gets fresh DNS
+			// resolution and TCP connections. Without this, the HTTP
+			// client's connection pool holds stale connections after
+			// a network partition, preventing recovery.
+			c.CloseIdleConnections()
 			d.logger.Warn("peer unreachable", "peer", name, "error", err)
 		} else {
 			d.logger.Debug("peer reachable", "peer", name)
