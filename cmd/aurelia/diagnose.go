@@ -24,6 +24,12 @@ var diagnoseCmd = &cobra.Command{
 	Long:  "Interactive diagnostic conversation — aurelia reasons about its managed services using LLM tool calls.",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cleanup, err := diagnose.SetupLogging()
+		if err != nil {
+			return fmt.Errorf("setting up logging: %w", err)
+		}
+		defer cleanup()
+
 		cfg, err := config.Load(config.DefaultPath())
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)

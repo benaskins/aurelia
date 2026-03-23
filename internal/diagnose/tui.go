@@ -3,6 +3,7 @@ package diagnose
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -166,6 +167,7 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.input.Reset()
 
+			slog.Info("user message", "length", len(text))
 			m.entries = append(m.entries, chatEntry{role: "user", content: text})
 			m.messages = append(m.messages, talk.Message{Role: talk.RoleUser, Content: text})
 			m.waiting = true
@@ -226,6 +228,7 @@ func (m TUIModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		action := m.pendingAction
+		slog.Info("action approved", "action", action.action, "service", action.service)
 		m.entries = append(m.entries, chatEntry{
 			role:    "action",
 			content: approvedStyle.Render(fmt.Sprintf("Approved: %s %s", action.action, action.service)),
@@ -236,6 +239,7 @@ func (m TUIModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "n", "N":
 		action := m.pendingAction
+		slog.Info("action rejected", "action", action.action, "service", action.service)
 		m.entries = append(m.entries, chatEntry{
 			role:    "action",
 			content: rejectedStyle.Render(fmt.Sprintf("Rejected: %s %s", action.action, action.service)),
@@ -256,6 +260,7 @@ func (m TUIModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m TUIModel) handleStreamTick(msg streamTickMsg) (tea.Model, tea.Cmd) {
 	ev := msg.event
 	if ev.err != nil {
+		slog.Error("LLM error", "error", ev.err)
 		m.entries = append(m.entries, chatEntry{role: "agent", content: fmt.Sprintf("Error: %v", ev.err)})
 		m.streaming = ""
 		m.waiting = false
@@ -263,6 +268,7 @@ func (m TUIModel) handleStreamTick(msg streamTickMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if ev.tool != nil {
+		slog.Info("tool use", "tool", ev.tool.name, "args", ev.tool.args)
 		label := fmt.Sprintf("\u21b3 %s", ev.tool.name)
 		if len(ev.tool.args) > 0 {
 			var parts []string
@@ -281,6 +287,7 @@ func (m TUIModel) handleStreamTick(msg streamTickMsg) (tea.Model, tea.Cmd) {
 			content = m.streaming
 		}
 		if content != "" {
+			slog.Info("agent response", "length", len(content))
 			m.entries = append(m.entries, chatEntry{role: "agent", content: content})
 			m.messages = append(m.messages, talk.Message{Role: talk.RoleAssistant, Content: content})
 		}
