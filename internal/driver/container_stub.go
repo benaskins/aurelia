@@ -16,6 +16,7 @@ type ContainerConfig struct {
 	Env         []string
 	Cmd         []string          // command/args to pass to the container
 	NetworkMode string            // "host", "bridge", etc. Default: "host"
+	Privileged  bool              // run container in privileged mode
 	Volumes     map[string]string // host:container mount mappings
 	BufSize     int               // log ring buffer size (lines)
 }
