@@ -1281,3 +1281,72 @@ dependencies:
 		t.Errorf("expected requires=[db], got %v", appDeps.Requires)
 	}
 }
+
+func TestGraphEndpoint(t *testing.T) {
+	_, client := setupTestServer(t, map[string]string{
+		"db.yaml": `
+service:
+  name: db
+  type: native
+  command: "sleep 30"
+`,
+		"app.yaml": `
+service:
+  name: app
+  type: native
+  command: "sleep 30"
+dependencies:
+  after:
+    - db
+  requires:
+    - db
+`,
+	})
+
+	resp, err := client.Get("http://aurelia/v1/graph")
+	if err != nil {
+		t.Fatalf("GET /v1/graph: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var nodes []daemon.GraphNode
+	if err := json.NewDecoder(resp.Body).Decode(&nodes); err != nil {
+		t.Fatalf("decode graph: %v", err)
+	}
+
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(nodes))
+	}
+
+	// Build a map for easy lookup
+	byName := make(map[string]daemon.GraphNode)
+	for _, n := range nodes {
+		byName[n.Name] = n
+	}
+
+	app, ok := byName["app"]
+	if !ok {
+		t.Fatal("expected app node in graph")
+	}
+	if len(app.After) != 1 || app.After[0] != "db" {
+		t.Errorf("expected app.after=[db], got %v", app.After)
+	}
+	if len(app.Requires) != 1 || app.Requires[0] != "db" {
+		t.Errorf("expected app.requires=[db], got %v", app.Requires)
+	}
+
+	db, ok := byName["db"]
+	if !ok {
+		t.Fatal("expected db node in graph")
+	}
+	if len(db.After) != 0 {
+		t.Errorf("expected db.after=[], got %v", db.After)
+	}
+	if len(db.Requires) != 0 {
+		t.Errorf("expected db.requires=[], got %v", db.Requires)
+	}
+}

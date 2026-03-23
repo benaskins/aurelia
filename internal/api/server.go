@@ -66,6 +66,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	mux.HandleFunc("POST /v1/services/{name}/deploy", s.deployService)
 	mux.HandleFunc("POST /v1/services/{name}/ship", s.shipService)
 	mux.HandleFunc("GET /v1/services/{name}/logs", s.serviceLogs)
+	mux.HandleFunc("GET /v1/graph", s.graph)
 	mux.HandleFunc("POST /v1/reload", s.reload)
 	mux.HandleFunc("GET /v1/gpu", s.gpuInfo)
 	mux.HandleFunc("GET /v1/system", s.systemInfo)
@@ -460,6 +461,11 @@ func (s *Server) serviceHealth(w http.ResponseWriter, r *http.Request) {
 		Status:  string(state.Health),
 		History: history,
 	})
+}
+
+func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
+	nodes := s.daemon.ServiceGraph()
+	writeJSON(w, http.StatusOK, nodes)
 }
 
 func (s *Server) serviceDeps(w http.ResponseWriter, r *http.Request) {

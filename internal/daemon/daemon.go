@@ -475,6 +475,51 @@ func (d *Daemon) ServiceDeps(name string) (ServiceDeps, error) {
 	return result, nil
 }
 
+// GraphNode represents a service in the full dependency graph.
+type GraphNode struct {
+	Name         string       `json:"name"`
+	Type         string       `json:"type"`
+	State        driver.State `json:"state"`
+	Health       health.Status `json:"health"`
+	Port         int          `json:"port,omitempty"`
+	Uptime       string       `json:"uptime,omitempty"`
+	RestartCount int          `json:"restart_count"`
+	After        []string     `json:"after"`
+	Requires     []string     `json:"requires"`
+}
+
+// ServiceGraph returns all services with their state and dependency edges.
+func (d *Daemon) ServiceGraph() []GraphNode {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	nodes := make([]GraphNode, 0, len(d.services))
+	for _, ms := range d.services {
+		st := ms.State()
+		node := GraphNode{
+			Name:         st.Name,
+			Type:         st.Type,
+			State:        st.State,
+			Health:       st.Health,
+			Port:         st.Port,
+			Uptime:       st.Uptime,
+			RestartCount: st.RestartCount,
+			After:        []string{},
+			Requires:     []string{},
+		}
+		if d.deps != nil {
+			if after := d.deps.after[st.Name]; after != nil {
+				node.After = after
+			}
+			if requires := d.deps.requires[st.Name]; requires != nil {
+				node.Requires = requires
+			}
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes
+}
+
 // ServiceHealthHistory returns the recent health check records for a service.
 func (d *Daemon) ServiceHealthHistory(name string) ([]health.CheckRecord, error) {
 	ms, err := d.getService(name)
