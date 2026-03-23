@@ -1222,3 +1222,62 @@ func TestServiceHealth404(t *testing.T) {
 		t.Errorf("expected 404, got %d", resp.StatusCode)
 	}
 }
+
+func TestServiceDepsEndpoint(t *testing.T) {
+	_, client := setupTestServer(t, map[string]string{
+		"db.yaml": `
+service:
+  name: db
+  type: native
+  command: "sleep 30"
+`,
+		"app.yaml": `
+service:
+  name: app
+  type: native
+  command: "sleep 30"
+dependencies:
+  after:
+    - db
+  requires:
+    - db
+`,
+	})
+
+	resp, err := client.Get("http://aurelia/v1/services/db/deps")
+	if err != nil {
+		t.Fatalf("GET /v1/services/db/deps: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var deps daemon.ServiceDeps
+	json.NewDecoder(resp.Body).Decode(&deps)
+
+	if len(deps.Dependents) != 1 || deps.Dependents[0] != "app" {
+		t.Errorf("expected dependents=[app], got %v", deps.Dependents)
+	}
+	if len(deps.CascadeImpact) != 1 || deps.CascadeImpact[0] != "app" {
+		t.Errorf("expected cascade_impact=[app], got %v", deps.CascadeImpact)
+	}
+
+	// Check the app side
+	resp2, err := client.Get("http://aurelia/v1/services/app/deps")
+	if err != nil {
+		t.Fatalf("GET /v1/services/app/deps: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	var appDeps daemon.ServiceDeps
+	json.NewDecoder(resp2.Body).Decode(&appDeps)
+
+	if len(appDeps.After) != 1 || appDeps.After[0] != "db" {
+		t.Errorf("expected after=[db], got %v", appDeps.After)
+	}
+	if len(appDeps.Requires) != 1 || appDeps.Requires[0] != "db" {
+		t.Errorf("expected requires=[db], got %v", appDeps.Requires)
+	}
+}

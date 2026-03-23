@@ -435,6 +435,46 @@ func (d *Daemon) InspectService(name string) (ServiceInspect, error) {
 	return ms.Inspect(), nil
 }
 
+// ServiceDeps returns dependency information for a service.
+type ServiceDeps struct {
+	After         []string `json:"after"`
+	Requires      []string `json:"requires"`
+	Dependents    []string `json:"dependents"`
+	CascadeImpact []string `json:"cascade_impact"`
+}
+
+// ServiceDeps returns the dependency graph for a named service.
+func (d *Daemon) ServiceDeps(name string) (ServiceDeps, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if _, ok := d.services[name]; !ok {
+		return ServiceDeps{}, fmt.Errorf("service %q not found", name)
+	}
+
+	result := ServiceDeps{}
+	if d.deps != nil {
+		result.After = d.deps.after[name]
+		result.Requires = d.deps.requires[name]
+		result.Dependents = d.deps.dependents[name]
+		result.CascadeImpact = d.deps.cascadeStopTargets(name)
+	}
+	// Ensure non-nil slices for clean JSON
+	if result.After == nil {
+		result.After = []string{}
+	}
+	if result.Requires == nil {
+		result.Requires = []string{}
+	}
+	if result.Dependents == nil {
+		result.Dependents = []string{}
+	}
+	if result.CascadeImpact == nil {
+		result.CascadeImpact = []string{}
+	}
+	return result, nil
+}
+
 // ServiceHealthHistory returns the recent health check records for a service.
 func (d *Daemon) ServiceHealthHistory(name string) ([]health.CheckRecord, error) {
 	ms, err := d.getService(name)
