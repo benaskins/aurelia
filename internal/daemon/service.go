@@ -445,8 +445,10 @@ func (ms *ManagedService) handleStarting(ctx context.Context) (driver.Driver, su
 		ms.mu.Unlock()
 		ms.logger.Info("adopted running process", "pid", drv.Info().PID)
 
+		monitor := ms.startHealthMonitor(ctx)
 		ms.mu.Lock()
 		ms.drv = drv
+		ms.monitor = monitor
 		ms.mu.Unlock()
 		return drv, phaseRunning
 	}
