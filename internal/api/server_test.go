@@ -1282,6 +1282,55 @@ dependencies:
 	}
 }
 
+func TestUIServing(t *testing.T) {
+	_, client := setupTestServer(t, map[string]string{
+		"app.yaml": `
+service:
+  name: app
+  type: native
+  command: "sleep 30"
+`,
+	})
+
+	// Root should redirect to /ui/
+	resp, err := client.Get("http://aurelia/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	resp.Body.Close()
+	// http.Client follows redirects, so we should end up at /ui/
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200 after redirect, got %d", resp.StatusCode)
+	}
+
+	// /ui/ should serve index.html
+	resp, err = client.Get("http://aurelia/ui/")
+	if err != nil {
+		t.Fatalf("GET /ui/: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("expected text/html content-type, got %q", ct)
+	}
+
+	// dagre.min.js should be served
+	resp2, err := client.Get("http://aurelia/ui/dagre.min.js")
+	if err != nil {
+		t.Fatalf("GET /ui/dagre.min.js: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != 200 {
+		t.Errorf("expected 200 for dagre.min.js, got %d", resp2.StatusCode)
+	}
+}
+
 func TestGraphEndpoint(t *testing.T) {
 	_, client := setupTestServer(t, map[string]string{
 		"db.yaml": `

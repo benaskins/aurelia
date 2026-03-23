@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>aurelia</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Archivo+Black&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0c0c0c;
+      --fg: #e8e8e8;
+      --dim: #444;
+      --muted: #777;
+      --accent: #e04020;
+      --accent-dim: #802010;
+      --panel-bg: rgba(255, 255, 255, 0.03);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --ghost: rgba(255, 255, 255, 0.02);
+      --focus-bg: rgba(224, 64, 32, 0.1);
+
+      --healthy: #2ecc71;
+      --unhealthy: #e04020;
+      --unknown: #777;
+      --stopped: #444;
+    }
+
+    [data-theme="light"] {
+      --bg: #f0ebe4;
+      --fg: #1a1410;
+      --dim: #a08a78;
+      --muted: #5c4d42;
+      --accent: #c04020;
+      --accent-dim: #d4704a;
+      --panel-bg: rgba(192, 72, 32, 0.04);
+      --panel-border: rgba(160, 138, 120, 0.3);
+      --ghost: rgba(192, 72, 32, 0.04);
+      --focus-bg: rgba(192, 64, 32, 0.12);
+
+      --healthy: #27ae60;
+      --unhealthy: #c04020;
+      --unknown: #a08a78;
+      --stopped: #a08a78;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        --bg: #f0ebe4;
+        --fg: #1a1410;
+        --dim: #a08a78;
+        --muted: #5c4d42;
+        --accent: #c04020;
+        --accent-dim: #d4704a;
+        --panel-bg: rgba(192, 72, 32, 0.04);
+        --panel-border: rgba(160, 138, 120, 0.3);
+        --ghost: rgba(192, 72, 32, 0.04);
+        --focus-bg: rgba(192, 64, 32, 0.12);
+
+        --healthy: #27ae60;
+        --unhealthy: #c04020;
+        --unknown: #a08a78;
+        --stopped: #a08a78;
+      }
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Space Mono', monospace;
+      background: var(--bg);
+      color: var(--fg);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* --- Header --- */
+
+    .header {
+      padding: 1.5rem 2rem;
+      border-bottom: 1px solid var(--panel-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header-title {
+      font-family: 'Archivo Black', sans-serif;
+      font-size: 1.4rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .header-status {
+      font-size: 0.55rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .header-status .dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-right: 0.4rem;
+      vertical-align: middle;
+    }
+
+    .header-status .dot.ok { background: var(--healthy); }
+    .header-status .dot.err { background: var(--unhealthy); }
+
+    /* --- Graph container --- */
+
+    .graph-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      position: relative;
+    }
+
+    #graph svg {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+
+    /* --- Detail panel --- */
+
+    .detail-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.85);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    [data-theme="light"] .detail-overlay,
+    :root:not([data-theme="dark"]) .detail-overlay {
+      background: rgba(240, 235, 228, 0.92);
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) .detail-overlay {
+        background: rgba(240, 235, 228, 0.92);
+      }
+    }
+
+    .detail-overlay.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .detail-panel {
+      width: 90vw;
+      max-width: 40rem;
+      max-height: 85vh;
+      overflow-y: auto;
+      background: var(--bg);
+      border: 1px solid var(--panel-border);
+      transform: scale(0.92);
+      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .detail-overlay.active .detail-panel {
+      transform: scale(1);
+    }
+
+    .detail-close {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--dim);
+      padding: 0.4rem 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      z-index: 101;
+    }
+
+    .detail-close:hover {
+      color: var(--fg);
+      border-color: var(--fg);
+    }
+
+    .detail-header {
+      padding: 1.5rem 1.5rem 1rem;
+      border-bottom: 1px solid var(--panel-border);
+    }
+
+    .detail-name {
+      font-family: 'Archivo Black', sans-serif;
+      font-size: 1.8rem;
+      text-transform: uppercase;
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+
+    .detail-meta {
+      display: flex;
+      gap: 1.5rem;
+      margin-top: 0.75rem;
+    }
+
+    .detail-meta-item {
+      font-size: 0.55rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .detail-meta-label {
+      color: var(--dim);
+      margin-right: 0.3rem;
+    }
+
+    .detail-section {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--panel-border);
+    }
+
+    .detail-section:last-child {
+      border-bottom: none;
+    }
+
+    .detail-section-title {
+      font-size: 0.5rem;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--dim);
+      margin-bottom: 0.75rem;
+    }
+
+    .detail-deps-list {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .detail-dep-tag {
+      font-size: 0.6rem;
+      letter-spacing: 0.08em;
+      padding: 0.35rem 0.6rem;
+      border: 1px solid var(--dim);
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .detail-dep-tag:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .detail-dep-tag.hard {
+      border-color: var(--fg);
+      color: var(--fg);
+    }
+
+    .detail-logs {
+      font-size: 0.6rem;
+      line-height: 1.6;
+      color: var(--muted);
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 12rem;
+      overflow-y: auto;
+      background: var(--ghost);
+      padding: 0.75rem;
+      border: 1px solid var(--panel-border);
+    }
+
+    .detail-health-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .detail-health-entry {
+      font-size: 0.55rem;
+      display: flex;
+      gap: 0.75rem;
+      padding: 0.25rem 0;
+      border-bottom: 1px solid var(--panel-border);
+    }
+
+    .detail-health-entry:last-child {
+      border-bottom: none;
+    }
+
+    .detail-health-time {
+      color: var(--dim);
+      min-width: 5rem;
+    }
+
+    .detail-health-status {
+      min-width: 4rem;
+    }
+
+    .detail-health-latency {
+      color: var(--dim);
+    }
+
+    /* --- Legend --- */
+
+    .legend {
+      padding: 0.75rem 2rem;
+      border-top: 1px solid var(--panel-border);
+      display: flex;
+      gap: 1.5rem;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.5rem;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .legend-line {
+      width: 20px;
+      height: 0;
+      border-top: 1px solid;
+    }
+
+    .legend-line.dashed {
+      border-top-style: dashed;
+    }
+
+    /* --- Theme toggle --- */
+
+    .theme-toggle {
+      position: fixed;
+      bottom: 0.75rem;
+      left: 0.75rem;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.55rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--dim);
+      padding: 0.4rem 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      z-index: 10;
+    }
+
+    .theme-toggle:hover {
+      color: var(--fg);
+      border-color: var(--fg);
+    }
+
+    /* --- Transitions --- */
+
+    .node-group {
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .node-group:hover rect {
+      stroke: var(--accent) !important;
+    }
+
+    .node-group:hover .node-name {
+      fill: var(--accent) !important;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-title">Aurelia</div>
+    <div class="header-status" id="status">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">connecting</span>
+    </div>
+  </div>
+
+  <div class="graph-container">
+    <div id="graph"></div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-dot" style="background: var(--healthy)"></div>
+      healthy
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background: var(--unhealthy)"></div>
+      unhealthy
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background: var(--unknown)"></div>
+      unknown
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background: var(--stopped)"></div>
+      stopped
+    </div>
+    <div class="legend-item">
+      <div class="legend-line" style="border-color: var(--fg)"></div>
+      requires
+    </div>
+    <div class="legend-item">
+      <div class="legend-line dashed" style="border-color: var(--dim)"></div>
+      after
+    </div>
+  </div>
+
+  <!-- Detail overlay -->
+  <div class="detail-overlay" id="detailOverlay">
+    <div class="detail-panel" id="detailPanel">
+      <button class="detail-close" id="detailClose">close</button>
+      <div id="detailContent"></div>
+    </div>
+  </div>
+
+  <button class="theme-toggle" id="themeToggle">light</button>
+
+  <script src="dagre.min.js"></script>
+  <script>
+    // Theme
+    const toggle = document.getElementById('themeToggle');
+    const root = document.documentElement;
+
+    function getEffectiveTheme() {
+      const stored = localStorage.getItem('aurelia-theme');
+      if (stored) return stored;
+      return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    }
+
+    function applyTheme(theme) {
+      root.setAttribute('data-theme', theme);
+      toggle.textContent = theme === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('aurelia-theme', theme);
+    }
+
+    applyTheme(getEffectiveTheme());
+    toggle.addEventListener('click', () => {
+      const current = root.getAttribute('data-theme') || 'dark';
+      applyTheme(current === 'dark' ? 'light' : 'dark');
+    });
+
+    // State
+    let graphData = [];
+    let selectedNode = null;
+
+    const graphEl = document.getElementById('graph');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const detailOverlay = document.getElementById('detailOverlay');
+    const detailContent = document.getElementById('detailContent');
+    const detailClose = document.getElementById('detailClose');
+
+    // Colors
+    function healthColor(state, health) {
+      if (state === 'stopped' || state === 'failed') return 'var(--stopped)';
+      if (health === 'healthy') return 'var(--healthy)';
+      if (health === 'unhealthy') return 'var(--unhealthy)';
+      return 'var(--unknown)';
+    }
+
+    function stateLabel(state, health) {
+      if (state === 'failed') return 'failed';
+      if (state === 'stopped') return 'stopped';
+      if (state === 'starting') return 'starting';
+      if (state === 'stopping') return 'stopping';
+      return health || 'unknown';
+    }
+
+    function typeIcon(type) {
+      if (type === 'container') return '\u25A1'; // hollow square
+      if (type === 'external') return '\u25C7';  // hollow diamond
+      return '\u25CB'; // hollow circle for native
+    }
+
+    // Layout & render
+    function renderGraph(nodes) {
+      const g = new dagre.graphlib.Graph();
+      g.setGraph({
+        rankdir: 'TB',
+        nodesep: 40,
+        ranksep: 60,
+        marginx: 40,
+        marginy: 40,
+      });
+      g.setDefaultEdgeLabel(() => ({}));
+
+      const nodeW = 140;
+      const nodeH = 48;
+
+      nodes.forEach(n => {
+        g.setNode(n.name, { width: nodeW, height: nodeH, service: n });
+      });
+
+      // Build edges: requires (solid) and after (dashed)
+      const nodeNames = new Set(nodes.map(n => n.name));
+      nodes.forEach(n => {
+        (n.requires || []).forEach(dep => {
+          if (nodeNames.has(dep)) {
+            g.setEdge(dep, n.name, { type: 'requires' });
+          }
+        });
+        (n.after || []).forEach(dep => {
+          if (nodeNames.has(dep) && !(n.requires || []).includes(dep)) {
+            g.setEdge(dep, n.name, { type: 'after' });
+          }
+        });
+      });
+
+      dagre.layout(g);
+
+      const graph = g.graph();
+      const w = graph.width || 400;
+      const h = graph.height || 300;
+
+      let svg = `<svg width="100%" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">`;
+
+      // Arrow markers
+      svg += `<defs>
+        <marker id="arrowSolid" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6" fill="none" stroke="var(--fg)" stroke-width="1"/>
+        </marker>
+        <marker id="arrowDash" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6" fill="none" stroke="var(--dim)" stroke-width="1"/>
+        </marker>
+      </defs>`;
+
+      // Edges
+      g.edges().forEach(e => {
+        const edge = g.edge(e);
+        const points = edge.points;
+        if (!points || points.length < 2) return;
+
+        const isRequires = edge.type === 'requires';
+        const stroke = isRequires ? 'var(--fg)' : 'var(--dim)';
+        const dash = isRequires ? '' : 'stroke-dasharray="4,3"';
+        const marker = isRequires ? 'url(#arrowSolid)' : 'url(#arrowDash)';
+
+        let d = `M${points[0].x},${points[0].y}`;
+        for (let i = 1; i < points.length; i++) {
+          d += ` L${points[i].x},${points[i].y}`;
+        }
+
+        svg += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="1" ${dash} marker-end="${marker}"/>`;
+      });
+
+      // Nodes
+      g.nodes().forEach(id => {
+        const node = g.node(id);
+        const svc = node.service;
+        const x = node.x - nodeW / 2;
+        const y = node.y - nodeH / 2;
+        const color = healthColor(svc.state, svc.health);
+        const label = stateLabel(svc.state, svc.health);
+        const icon = typeIcon(svc.type);
+
+        svg += `<g class="node-group" data-name="${svc.name}" onclick="showDetail('${svc.name}')">`;
+        svg += `<rect x="${x}" y="${y}" width="${nodeW}" height="${nodeH}" fill="var(--bg)" stroke="var(--panel-border)" stroke-width="1"/>`;
+
+        // Health dot
+        svg += `<circle cx="${x + 12}" cy="${y + nodeH / 2}" r="4" fill="${color}"/>`;
+
+        // Name
+        svg += `<text class="node-name" x="${x + 22}" y="${y + 18}" fill="var(--fg)" font-size="10" font-family="'Space Mono', monospace" letter-spacing="0.06em">${svc.name}</text>`;
+
+        // Type + state
+        svg += `<text x="${x + 22}" y="${y + 34}" fill="var(--muted)" font-size="8" font-family="'Space Mono', monospace" letter-spacing="0.04em">${icon} ${svc.type} \u00B7 ${label}</text>`;
+
+        // Port
+        if (svc.port) {
+          svg += `<text x="${x + nodeW - 8}" y="${y + 18}" fill="var(--dim)" font-size="8" font-family="'Space Mono', monospace" text-anchor="end">:${svc.port}</text>`;
+        }
+
+        svg += `</g>`;
+      });
+
+      svg += `</svg>`;
+      graphEl.innerHTML = svg;
+    }
+
+    // Detail panel
+    function showDetail(name) {
+      selectedNode = name;
+      const svc = graphData.find(n => n.name === name);
+      if (!svc) return;
+
+      const color = healthColor(svc.state, svc.health);
+      const label = stateLabel(svc.state, svc.health);
+
+      let html = `
+        <div class="detail-header">
+          <div class="detail-name">${svc.name}</div>
+          <div class="detail-meta">
+            <div class="detail-meta-item">
+              <span class="detail-meta-label">type</span> ${svc.type}
+            </div>
+            <div class="detail-meta-item">
+              <span class="detail-meta-label">state</span> ${svc.state}
+            </div>
+            <div class="detail-meta-item">
+              <span class="detail-meta-label">health</span>
+              <span style="color: ${color}">${label}</span>
+            </div>
+            ${svc.port ? `<div class="detail-meta-item"><span class="detail-meta-label">port</span> ${svc.port}</div>` : ''}
+            ${svc.uptime ? `<div class="detail-meta-item"><span class="detail-meta-label">uptime</span> ${svc.uptime}</div>` : ''}
+            ${svc.restart_count ? `<div class="detail-meta-item"><span class="detail-meta-label">restarts</span> ${svc.restart_count}</div>` : ''}
+          </div>
+        </div>
+      `;
+
+      // Dependencies
+      const allDeps = [...new Set([...(svc.requires || []), ...(svc.after || [])])];
+      const requires = new Set(svc.requires || []);
+      if (allDeps.length > 0) {
+        html += `<div class="detail-section">
+          <div class="detail-section-title">Dependencies</div>
+          <div class="detail-deps-list">
+            ${allDeps.map(d => `<div class="detail-dep-tag ${requires.has(d) ? 'hard' : ''}" onclick="showDetail('${d}')">${d}${requires.has(d) ? ' (hard)' : ''}</div>`).join('')}
+          </div>
+        </div>`;
+      }
+
+      // Dependents (reverse lookup)
+      const dependents = graphData.filter(n =>
+        (n.requires || []).includes(name) || (n.after || []).includes(name)
+      );
+      if (dependents.length > 0) {
+        html += `<div class="detail-section">
+          <div class="detail-section-title">Depended on by</div>
+          <div class="detail-deps-list">
+            ${dependents.map(d => `<div class="detail-dep-tag" onclick="showDetail('${d.name}')">${d.name}</div>`).join('')}
+          </div>
+        </div>`;
+      }
+
+      detailContent.innerHTML = html;
+      detailOverlay.classList.add('active');
+
+      // Fetch health and logs in parallel
+      Promise.all([
+        fetch(`/v1/services/${name}/health`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`/v1/services/${name}/logs?n=30`).then(r => r.ok ? r.json() : null).catch(() => null),
+      ]).then(([healthData, logsData]) => {
+        let extra = '';
+
+        if (healthData && healthData.history && healthData.history.length > 0) {
+          extra += `<div class="detail-section">
+            <div class="detail-section-title">Health History</div>
+            <div class="detail-health-list">
+              ${healthData.history.slice(-10).reverse().map(h => `
+                <div class="detail-health-entry">
+                  <span class="detail-health-time">${new Date(h.timestamp).toLocaleTimeString()}</span>
+                  <span class="detail-health-status" style="color: ${h.status === 'healthy' ? 'var(--healthy)' : h.status === 'unhealthy' ? 'var(--unhealthy)' : 'var(--unknown)'}">${h.status}</span>
+                  ${h.latency ? `<span class="detail-health-latency">${h.latency}</span>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </div>`;
+        }
+
+        if (logsData && logsData.length > 0) {
+          const escaped = logsData.join('\n').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          extra += `<div class="detail-section">
+            <div class="detail-section-title">Logs (last ${logsData.length})</div>
+            <div class="detail-logs">${escaped}</div>
+          </div>`;
+        }
+
+        if (extra) {
+          detailContent.innerHTML += extra;
+        }
+      });
+    }
+
+    function closeDetail() {
+      detailOverlay.classList.remove('active');
+      selectedNode = null;
+    }
+
+    detailClose.addEventListener('click', closeDetail);
+    detailOverlay.addEventListener('click', e => {
+      if (e.target === detailOverlay) closeDetail();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeDetail();
+    });
+
+    // Polling
+    let pollInterval = null;
+    let consecutiveErrors = 0;
+
+    async function fetchGraph() {
+      try {
+        const resp = await fetch('/v1/graph');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        graphData = await resp.json();
+        consecutiveErrors = 0;
+
+        statusDot.className = 'dot ok';
+        statusText.textContent = `${graphData.length} services`;
+
+        renderGraph(graphData);
+      } catch (err) {
+        consecutiveErrors++;
+        statusDot.className = 'dot err';
+        statusText.textContent = 'disconnected';
+
+        if (consecutiveErrors > 3) {
+          graphEl.innerHTML = `<div style="text-align: center; color: var(--muted); font-size: 0.7rem; letter-spacing: 0.1em;">DISCONNECTED FROM DAEMON</div>`;
+        }
+      }
+    }
+
+    // Initial fetch + poll every 3s
+    fetchGraph();
+    pollInterval = setInterval(fetchGraph, 3000);
+  </script>
+</body>
+</html>

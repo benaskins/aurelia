@@ -6,9 +6,11 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -25,6 +27,9 @@ import (
 	"github.com/benaskins/aurelia/internal/node"
 	"github.com/benaskins/aurelia/internal/sysinfo"
 )
+
+//go:embed ui
+var uiFS embed.FS
 
 // Server serves the aurelia REST API over a Unix socket.
 type Server struct {
@@ -84,6 +89,17 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 
 	// Peer token distribution (mTLS-only)
 	mux.HandleFunc("POST /v1/peer/token", s.peerTokenUpdate)
+
+	// Web UI — serve embedded static files
+	uiContent, _ := fs.Sub(uiFS, "ui")
+	mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(uiContent))))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/ui/", http.StatusFound)
+			return
+		}
+		http.NotFound(w, r)
+	})
 
 	s.server = &http.Server{
 		Handler:           mux,
