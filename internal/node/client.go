@@ -186,6 +186,19 @@ func (c *Client) Lamina(args []string) (*LaminaResponse, error) {
 	return &resp, nil
 }
 
+// PushToken sends a new bearer token to the remote peer for updating its config.
+// This is used during token rotation and requires mTLS authentication.
+func (c *Client) PushToken(nodeName, newToken string) error {
+	_, err := c.postJSON("/v1/peer/token", map[string]string{
+		"node":  nodeName,
+		"token": newToken,
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (c *Client) get(path string) (io.ReadCloser, error) {
 	req, err := http.NewRequest("GET", c.scheme+"://"+c.addr+path, nil)
 	if err != nil {

@@ -1052,6 +1052,99 @@ func TestAuditLogMiddleware(t *testing.T) {
 	}
 }
 
+func TestTokenRotationDualTokenWindow(t *testing.T) {
+	d := daemon.NewDaemon(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("daemon start: %v", err)
+	}
+	t.Cleanup(func() { d.Stop(5 * time.Second) })
+
+	srv := NewServer(d, nil)
+	tokenPath := filepath.Join(t.TempDir(), "api.token")
+	srv.GenerateToken(tokenPath)
+	oldToken := srv.token
+
+	// Rotate
+	newToken, err := srv.RotateToken()
+	if err != nil {
+		t.Fatalf("RotateToken: %v", err)
+	}
+	if newToken == oldToken {
+		t.Error("new token should differ from old")
+	}
+
+	// Both tokens should be valid during dual-token window
+	if !srv.validToken(oldToken) {
+		t.Error("old token should be valid during rotation")
+	}
+	if !srv.validToken(newToken) {
+		t.Error("new token should be valid during rotation")
+	}
+
+	// Commit rotation
+	srv.CommitTokenRotation()
+
+	// Only new token should be valid
+	if srv.validToken(oldToken) {
+		t.Error("old token should be invalid after commit")
+	}
+	if !srv.validToken(newToken) {
+		t.Error("new token should still be valid after commit")
+	}
+}
+
+func TestPeerTokenUpdateRequiresMTLS(t *testing.T) {
+	certs := generateTestCerts(t, "limen")
+
+	d := daemon.NewDaemon(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("daemon start: %v", err)
+	}
+	t.Cleanup(func() { d.Stop(5 * time.Second) })
+
+	srv := NewServer(d, nil)
+	tokenPath := filepath.Join(t.TempDir(), "api.token")
+	srv.GenerateToken(tokenPath)
+
+	serverTLS, _ := LoadTLSConfig(certs.ServerCertPath, certs.ServerKeyPath, certs.CAPath)
+	ln, _ := tls.Listen("tcp", "127.0.0.1:0", serverTLS)
+	addr := ln.Addr().String()
+
+	srv.tcpServer = &http.Server{
+		Handler: srv.rateLimiter.handler(srv.requireAuth(srv.auditLog(srv.server.Handler))),
+	}
+	go srv.tcpServer.Serve(ln)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	caPEM, _ := os.ReadFile(certs.CAPath)
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caPEM)
+
+	// Bearer token client should be forbidden from peer token update
+	tokenBytes, _ := os.ReadFile(tokenPath)
+	req, _ := http.NewRequest("POST", "https://"+addr+"/v1/peer/token", strings.NewReader(`{"node":"hestia","token":"new-tok"}`))
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tokenBytes)))
+	req.Header.Set("Content-Type", "application/json")
+
+	noAuthClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: caPool},
+		},
+	}
+	resp, err := noAuthClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 for CLI client, got %d", resp.StatusCode)
+	}
+}
+
 func TestLoadTLSConfigInvalidPaths(t *testing.T) {
 	t.Parallel()
 

@@ -66,6 +66,37 @@ func (c *Config) FindNode(name string) (Node, bool) {
 	return Node{}, false
 }
 
+// UpdateNodeToken updates the inline token for a named node in the config file.
+// Reads the file, modifies the node's token, and writes it back.
+func UpdateNodeToken(path, nodeName, newToken string) error {
+	cfg, err := Load(path)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	found := false
+	for i := range cfg.Nodes {
+		if cfg.Nodes[i].Name == nodeName {
+			cfg.Nodes[i].Token = newToken
+			cfg.Nodes[i].TokenFile = "" // clear file reference, inline takes precedence
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("node %q not found in config", nodeName)
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+	return nil
+}
+
 // DefaultPath returns the default config file path: ~/.aurelia/config.yaml.
 func DefaultPath() string {
 	home, err := os.UserHomeDir()

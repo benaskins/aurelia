@@ -15,8 +15,10 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/benaskins/aurelia/internal/config"
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/gpu"
 	"github.com/benaskins/aurelia/internal/node"
@@ -31,8 +33,12 @@ type Server struct {
 	tcpServer   *http.Server // separate server for TCP with auth middleware
 	logger      *slog.Logger
 	token       string // bearer token for TCP auth (empty = no auth)
+	prevToken   string // previous token during rotation (valid until rotation completes)
+	tokenPath   string // path to token file on disk
+	tokenMu     sync.RWMutex
 	nodeName    string // local node name for stamping on service states
 	laminaRoot  string // workspace root for lamina CLI execution
+	configPath  string // path to config file for token updates
 	rateLimiter *rateLimitMiddleware
 }
 
@@ -67,6 +73,12 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	// Lamina workspace CLI execution
 	mux.HandleFunc("POST /v1/lamina", s.laminaExec)
 
+	// Token management
+	mux.HandleFunc("POST /v1/token/rotate", s.tokenRotate)
+
+	// Peer token distribution (mTLS-only)
+	mux.HandleFunc("POST /v1/peer/token", s.peerTokenUpdate)
+
 	s.server = &http.Server{
 		Handler:           mux,
 		ReadTimeout:       30 * time.Second,
@@ -82,6 +94,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 // new one if the file does not exist. This ensures tokens are stable across
 // daemon restarts so peer nodes don't need re-configuration.
 func (s *Server) GenerateToken(tokenPath string) error {
+	s.tokenPath = tokenPath
 	// Reuse existing token if present
 	if data, err := os.ReadFile(tokenPath); err == nil {
 		token := strings.TrimSpace(string(data))
@@ -102,6 +115,57 @@ func (s *Server) GenerateToken(tokenPath string) error {
 	}
 	s.logger.Info("API token generated", "path", tokenPath)
 	return nil
+}
+
+// RotateToken generates a new token, keeping the old one valid until
+// CommitTokenRotation is called. Returns the new token.
+func (s *Server) RotateToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generating token: %w", err)
+	}
+	newToken := hex.EncodeToString(b)
+
+	s.tokenMu.Lock()
+	s.prevToken = s.token
+	s.token = newToken
+	s.tokenMu.Unlock()
+
+	// Write new token to disk
+	if s.tokenPath != "" {
+		if err := os.WriteFile(s.tokenPath, []byte(newToken), 0600); err != nil {
+			return "", fmt.Errorf("writing token file: %w", err)
+		}
+	}
+
+	s.logger.Info("token rotated, dual-token window active")
+	return newToken, nil
+}
+
+// CommitTokenRotation invalidates the previous token, completing the rotation.
+func (s *Server) CommitTokenRotation() {
+	s.tokenMu.Lock()
+	s.prevToken = ""
+	s.tokenMu.Unlock()
+	s.logger.Info("token rotation committed, previous token invalidated")
+}
+
+// SetConfigPath sets the path to the config file for token updates from peers.
+func (s *Server) SetConfigPath(path string) {
+	s.configPath = path
+}
+
+// validToken returns true if the provided token matches either the current or previous token.
+func (s *Server) validToken(provided string) bool {
+	s.tokenMu.RLock()
+	defer s.tokenMu.RUnlock()
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) == 1 {
+		return true
+	}
+	if s.prevToken != "" && subtle.ConstantTimeCompare([]byte(provided), []byte(s.prevToken)) == 1 {
+		return true
+	}
+	return false
 }
 
 // ListenUnix starts the server on a Unix socket.
@@ -259,7 +323,7 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			return
 		}
 		provided := strings.TrimPrefix(auth, "Bearer ")
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) != 1 {
+		if !s.validToken(provided) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
@@ -328,7 +392,7 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 			return
 		}
 		provided := strings.TrimPrefix(auth, "Bearer ")
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) != 1 {
+		if !s.validToken(provided) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
@@ -680,4 +744,97 @@ func (s *Server) routeLocalAction(w http.ResponseWriter, r *http.Request, name, 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": action + "ing"})
+}
+
+// tokenRotate handles the full token rotation flow:
+// 1. Generate new token (old remains valid)
+// 2. Push to all reachable peers via mTLS
+// 3. On quorum, invalidate old token
+func (s *Server) tokenRotate(w http.ResponseWriter, r *http.Request) {
+	force := r.URL.Query().Get("force") == "true"
+
+	newToken, err := s.RotateToken()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Push to peers
+	peers := s.daemon.Peers()
+	peerResults := make(map[string]string)
+	confirmed := 0
+	total := 0
+
+	for name, c := range peers {
+		total++
+		if err := c.PushToken(s.nodeName, newToken); err != nil {
+			peerResults[name] = "failed: " + err.Error()
+			s.logger.Warn("failed to push token to peer", "peer", name, "error", err)
+		} else {
+			peerResults[name] = "ok"
+			confirmed++
+		}
+	}
+
+	// Quorum check: all reachable peers confirmed
+	if confirmed == total || force {
+		s.CommitTokenRotation()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":    "rotated",
+			"peers":     peerResults,
+			"confirmed": confirmed,
+			"total":     total,
+		})
+	} else {
+		// Keep dual-token window open
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":    "partial",
+			"peers":     peerResults,
+			"confirmed": confirmed,
+			"total":     total,
+			"message":   "some peers unreachable, old token still valid; use --force to override",
+		})
+	}
+}
+
+// peerTokenUpdate handles token distribution from a peer during rotation.
+// Only accessible via mTLS (requires verified client cert).
+func (s *Server) peerTokenUpdate(w http.ResponseWriter, r *http.Request) {
+	// Require mTLS (cert identity, not CLI bearer token)
+	peer := PeerIdentity(r.Context())
+	if peer == "" || peer == "cli" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "peer token update requires mTLS authentication",
+		})
+		return
+	}
+
+	var req struct {
+		Node  string `json:"node"`
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.Node == "" || req.Token == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "node and token required"})
+		return
+	}
+
+	// Update config file on disk
+	cfgPath := s.configPath
+	if cfgPath == "" {
+		cfgPath = config.DefaultPath()
+	}
+	if err := config.UpdateNodeToken(cfgPath, req.Node, req.Token); err != nil {
+		s.logger.Error("failed to update peer token", "peer", peer, "node", req.Node, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": errorMessage("failed to update token", err, r),
+		})
+		return
+	}
+
+	s.logger.Info("peer token updated", "from_peer", peer, "for_node", req.Node)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }

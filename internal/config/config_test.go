@@ -291,6 +291,62 @@ func TestLoadNoTLSConfig(t *testing.T) {
 	}
 }
 
+func TestUpdateNodeToken(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `node_name: hestia
+nodes:
+  - name: limen
+    addr: limen.internal:9090
+    token: old-token
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := UpdateNodeToken(path, "limen", "new-token"); err != nil {
+		t.Fatalf("UpdateNodeToken: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after update: %v", err)
+	}
+	n, ok := cfg.FindNode("limen")
+	if !ok {
+		t.Fatal("node limen not found after update")
+	}
+	if n.Token != "new-token" {
+		t.Errorf("token = %q, want %q", n.Token, "new-token")
+	}
+	if n.TokenFile != "" {
+		t.Errorf("token_file should be cleared, got %q", n.TokenFile)
+	}
+}
+
+func TestUpdateNodeTokenNotFound(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `node_name: hestia
+nodes:
+  - name: limen
+    addr: limen.internal:9090
+    token: tok
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := UpdateNodeToken(path, "nonexistent", "new-token")
+	if err == nil {
+		t.Error("expected error for nonexistent node")
+	}
+}
+
 func TestLoadCommentsOnly(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
