@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -23,9 +24,8 @@ import (
 )
 
 const (
-	daemonPort     = "9090/tcp"
-	imageTag       = "aurelia-test-node:latest"
-	dockerfilePath = "internal/multinode/Dockerfile"
+	daemonPort = "9090/tcp"
+	imageTag   = "aurelia-test-node:latest"
 )
 
 // Cluster manages a set of aurelia daemon containers for integration testing.
@@ -49,6 +49,7 @@ type TestNode struct {
 }
 
 // NewCluster builds the test image, creates a Docker network, and starts n daemon nodes.
+// All nodes are pre-configured with the full peer list so they discover each other immediately.
 func NewCluster(t *testing.T, n int) *Cluster {
 	t.Helper()
 	ctx := context.Background()
@@ -71,8 +72,18 @@ func NewCluster(t *testing.T, n int) *Cluster {
 		Timings: NewTimingCollector(),
 	}
 
-	for i := 1; i <= n; i++ {
-		c.AddNode(t)
+	// Pre-plan: generate names and certs for all nodes
+	names := make([]string, n)
+	certs := make([]NodeCerts, n)
+	for i := 0; i < n; i++ {
+		names[i] = fmt.Sprintf("node-%d", i+1)
+		certs[i] = c.ca.IssueNodeCert(t, names[i])
+	}
+
+	// Generate configs with full peer lists, then start all containers
+	for i := 0; i < n; i++ {
+		configDir := c.writeNodeConfigWithPeers(t, names[i], certs[i], names)
+		c.startNode(t, names[i], certs[i], configDir)
 	}
 
 	// Wait for all peers to discover each other
@@ -81,8 +92,9 @@ func NewCluster(t *testing.T, n int) *Cluster {
 	return c
 }
 
-// AddNode creates and starts a new daemon container, then triggers a reload
-// on existing nodes so they discover the new peer.
+// AddNode creates and starts a new daemon container.
+// The new node knows about all existing nodes, but existing nodes won't
+// discover it until their next config reload or restart.
 func (c *Cluster) AddNode(t *testing.T) *TestNode {
 	t.Helper()
 	c.mu.Lock()
@@ -91,9 +103,18 @@ func (c *Cluster) AddNode(t *testing.T) *TestNode {
 	name := fmt.Sprintf("node-%d", len(c.nodes)+1)
 	certs := c.ca.IssueNodeCert(t, name)
 
-	// Write config and spec files for this node
-	configDir := c.writeNodeConfig(t, name, certs)
+	// New node gets all existing peers in its config
+	allNames := []string{name}
+	for n := range c.nodes {
+		allNames = append(allNames, n)
+	}
+	configDir := c.writeNodeConfigWithPeers(t, name, certs, allNames)
+	return c.startNode(t, name, certs, configDir)
+}
 
+// startNode creates and starts a container for the named node.
+func (c *Cluster) startNode(t *testing.T, name string, certs NodeCerts, configDir string) *TestNode {
+	t.Helper()
 	ctx := context.Background()
 
 	req := testcontainers.ContainerRequest{
@@ -103,9 +124,7 @@ func (c *Cluster) AddNode(t *testing.T) *TestNode {
 		NetworkAliases: map[string][]string{
 			c.net.Name: {name},
 		},
-		WaitingFor: wait.ForHTTP("/v1/health").
-			WithPort(daemonPort).
-			WithTLS(true, c.tlsConfigForHealthCheck()).
+		WaitingFor: wait.ForListeningPort(daemonPort).
 			WithStartupTimeout(30 * time.Second),
 		Files: []testcontainers.ContainerFile{
 			{
@@ -154,7 +173,6 @@ func (c *Cluster) AddNode(t *testing.T) *TestNode {
 		t.Fatalf("getting port for %s: %v", name, err)
 	}
 
-	// Read the generated token from the container
 	token := c.readToken(t, container)
 
 	node := &TestNode{
@@ -167,12 +185,6 @@ func (c *Cluster) AddNode(t *testing.T) *TestNode {
 	}
 
 	c.nodes[name] = node
-
-	// Update configs on existing nodes to include the new peer
-	if len(c.nodes) > 1 {
-		c.regenerateAllConfigs(t)
-	}
-
 	return node
 }
 
@@ -308,47 +320,59 @@ func (n *TestNode) ClusterServices() ([]json.RawMessage, map[string]string, erro
 
 // --- internal helpers ---
 
-func buildImage(t *testing.T, ctx context.Context) {
+// repoRoot finds the aurelia repo root by walking up to find go.mod.
+func repoRoot(t *testing.T) string {
 	t.Helper()
-	req := testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			FromDockerfile: testcontainers.FromDockerfile{
-				Context:    ".",
-				Dockerfile: dockerfilePath,
-				Tag:        imageTag,
-			},
-		},
-	}
-	// Build only (no start). Use the provider directly.
-	provider, err := testcontainers.NewDockerProvider()
+	dir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("creating docker provider: %v", err)
+		t.Fatal(err)
 	}
-	_, err = provider.BuildImage(ctx, &req.ContainerRequest)
-	if err != nil {
-		t.Fatalf("building test image: %v", err)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("could not find repo root (no go.mod found)")
+		}
+		dir = parent
 	}
 }
 
-func (c *Cluster) writeNodeConfig(t *testing.T, name string, certs NodeCerts) string {
+func buildImage(t *testing.T, _ context.Context) {
+	t.Helper()
+	root := repoRoot(t)
+	cmd := exec.Command("docker", "build",
+		"-f", filepath.Join(root, "internal/multinode/Dockerfile"),
+		"-t", imageTag,
+		root,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("building test image: %v\n%s", err, out)
+	}
+}
+
+// writeNodeConfigWithPeers writes config and spec files for a node, including
+// all other names in allNames as peers.
+func (c *Cluster) writeNodeConfigWithPeers(t *testing.T, name string, certs NodeCerts, allNames []string) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	// Build peer list (all nodes except self)
 	type nodeEntry struct {
 		Name  string `yaml:"name"`
 		Addr  string `yaml:"addr"`
 		Token string `yaml:"token"`
 	}
 	var peers []nodeEntry
-	for peerName := range c.nodes {
+	for _, peerName := range allNames {
 		if peerName == name {
 			continue
 		}
 		peers = append(peers, nodeEntry{
 			Name:  peerName,
-			Addr:  peerName + ":9090", // Docker DNS within the network
-			Token: "placeholder",       // will be updated after daemon generates token
+			Addr:  peerName + ":9090",
+			Token: "placeholder", // peers use mTLS, token is for CLI only
 		})
 	}
 
@@ -373,7 +397,6 @@ func (c *Cluster) writeNodeConfig(t *testing.T, name string, certs NodeCerts) st
 		t.Fatal(err)
 	}
 
-	// Write a simple service spec
 	spec := `service:
   name: test-svc
   type: native
@@ -418,19 +441,11 @@ func (c *Cluster) makeHTTPClient(certs NodeCerts) *http.Client {
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{cert},
-				RootCAs:      caPool,
+				Certificates:       []tls.Certificate{cert},
+				RootCAs:            caPool,
+				InsecureSkipVerify: true, // host connects via mapped port; hostname won't match cert CN
 			},
 		},
-	}
-}
-
-func (c *Cluster) tlsConfigForHealthCheck() *tls.Config {
-	caPool := x509.NewCertPool()
-	caPool.AppendCertsFromPEM(c.ca.CertPEM)
-	return &tls.Config{
-		RootCAs:            caPool,
-		InsecureSkipVerify: true, // health check from host can't verify container hostname
 	}
 }
 
@@ -458,9 +473,3 @@ func (c *Cluster) waitForPeerDiscovery(t *testing.T, timeout time.Duration) {
 	t.Fatalf("peer discovery did not complete within %s", timeout)
 }
 
-func (c *Cluster) regenerateAllConfigs(t *testing.T) {
-	// For existing nodes, we'd need to update their config and reload.
-	// For now, this is a limitation: nodes only know about peers present at startup.
-	// TODO: implement config push + reload for dynamic peer discovery
-	t.Log("note: new node added but existing nodes need daemon restart to discover it")
-}
