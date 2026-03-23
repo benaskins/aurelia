@@ -24,24 +24,26 @@ import (
 
 // Server serves the aurelia REST API over a Unix socket.
 type Server struct {
-	daemon     *daemon.Daemon
-	gpu        *gpu.Observer
-	listener   net.Listener
-	server     *http.Server
-	tcpServer  *http.Server // separate server for TCP with auth middleware
-	logger     *slog.Logger
-	token      string // bearer token for TCP auth (empty = no auth)
-	nodeName   string // local node name for stamping on service states
-	laminaRoot string // workspace root for lamina CLI execution
+	daemon      *daemon.Daemon
+	gpu         *gpu.Observer
+	listener    net.Listener
+	server      *http.Server
+	tcpServer   *http.Server // separate server for TCP with auth middleware
+	logger      *slog.Logger
+	token       string // bearer token for TCP auth (empty = no auth)
+	nodeName    string // local node name for stamping on service states
+	laminaRoot  string // workspace root for lamina CLI execution
+	rateLimiter *rateLimitMiddleware
 }
 
 // NewServer creates an API server backed by the given daemon.
 // The GPU observer is optional — if nil, /v1/gpu returns empty.
 func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	s := &Server{
-		daemon: d,
-		gpu:    gpuObs,
-		logger: slog.With("component", "api"),
+		daemon:      d,
+		gpu:         gpuObs,
+		logger:      slog.With("component", "api"),
+		rateLimiter: newRateLimitMiddleware(),
 	}
 
 	mux := http.NewServeMux()
@@ -141,9 +143,9 @@ func (s *Server) ListenTCP(addr string) error {
 	}
 	s.logger.Info("API listening", "addr", addr)
 
-	// Wrap with auth + audit middleware for TCP connections
+	// Wrap with rate limit + auth + audit middleware for TCP connections
 	s.tcpServer = &http.Server{
-		Handler:           s.requireToken(s.auditLog(s.server.Handler)),
+		Handler:           s.rateLimiter.handler(s.requireToken(s.auditLog(s.server.Handler))),
 		ReadTimeout:       s.server.ReadTimeout,
 		WriteTimeout:      s.server.WriteTimeout,
 		ReadHeaderTimeout: s.server.ReadHeaderTimeout,
@@ -227,7 +229,7 @@ func (s *Server) ListenTLS(addr string, tlsConfig *tls.Config) error {
 	s.logger.Info("API listening (TLS)", "addr", addr)
 
 	s.tcpServer = &http.Server{
-		Handler:           s.requireAuth(s.auditLog(s.server.Handler)),
+		Handler:           s.rateLimiter.handler(s.requireAuth(s.auditLog(s.server.Handler))),
 		ReadTimeout:       s.server.ReadTimeout,
 		WriteTimeout:      s.server.WriteTimeout,
 		ReadHeaderTimeout: s.server.ReadHeaderTimeout,
