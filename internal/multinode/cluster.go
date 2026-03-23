@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	dockernetwork "github.com/docker/docker/api/types/network"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -235,7 +236,7 @@ func (c *Cluster) DisconnectNode(t *testing.T, name string) {
 	}
 }
 
-// ReconnectNode re-attaches a node to the Docker network.
+// ReconnectNode re-attaches a node to the Docker network with its original alias.
 func (c *Cluster) ReconnectNode(t *testing.T, name string) {
 	c.mu.Lock()
 	node, ok := c.nodes[name]
@@ -249,7 +250,9 @@ func (c *Cluster) ReconnectNode(t *testing.T, name string) {
 	if err != nil {
 		t.Fatalf("creating docker provider: %v", err)
 	}
-	err = provider.Client().NetworkConnect(ctx, c.net.ID, cid, nil)
+	err = provider.Client().NetworkConnect(ctx, c.net.ID, cid, &dockernetwork.EndpointSettings{
+		Aliases: []string{name},
+	})
 	if err != nil {
 		t.Fatalf("reconnecting %s to network: %v", name, err)
 	}

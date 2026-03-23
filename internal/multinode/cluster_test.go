@@ -253,15 +253,8 @@ func TestNetworkPartition(t *testing.T) {
 	}
 
 	t.Logf("peers after reconnect: %v", peersAfter)
-
-	// Network partition recovery depends on Docker network reconnect restoring
-	// DNS resolution and TCP reachability. CloseIdleConnections (fixed in peers.go)
-	// handles stale connection pools, but container DNS caching or OrbStack-specific
-	// networking may delay recovery beyond the liveness interval.
-	if peersAfter["node-2"] == "ok" {
-		t.Log("node-2 recovered after reconnect")
-	} else {
-		t.Log("node-2 still unreachable after reconnect (DNS/network recovery lag)")
+	if peersAfter["node-2"] != "ok" {
+		t.Errorf("node-2 status after reconnect = %q, want ok", peersAfter["node-2"])
 	}
 }
 
@@ -388,7 +381,7 @@ func TestAggregationScaling(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	for _, n := range []int{3, 5, 7} {
+	for _, n := range []int{2, 3, 5, 8, 13, 21, 34, 55, 89} {
 		t.Run(fmt.Sprintf("%d-nodes", n), func(t *testing.T) {
 			c := NewCluster(t, n)
 			defer c.Timings.Report(t)

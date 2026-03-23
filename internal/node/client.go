@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -21,6 +22,26 @@ type Client struct {
 	http   *http.Client
 }
 
+// peerTransport returns an http.Transport configured for peer communication.
+// Short idle timeout and connection lifetime ensure DNS changes (e.g., after
+// a network partition recovery) are picked up within one liveness cycle.
+func peerTransport(tlsConfig *tls.Config) *http.Transport {
+	dialer := &net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 15 * time.Second,
+	}
+	t := &http.Transport{
+		DialContext:         dialer.DialContext,
+		IdleConnTimeout:    15 * time.Second,
+		MaxIdleConnsPerHost: 1,
+		TLSHandshakeTimeout: 5 * time.Second,
+	}
+	if tlsConfig != nil {
+		t.TLSClientConfig = tlsConfig
+	}
+	return t
+}
+
 // New creates a client for a remote aurelia daemon using bearer token auth over plain HTTP.
 func New(name, addr, token string) *Client {
 	return &Client{
@@ -29,7 +50,8 @@ func New(name, addr, token string) *Client {
 		token:  token,
 		scheme: "http",
 		http: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: peerTransport(nil),
 		},
 	}
 }
@@ -44,10 +66,8 @@ func NewTLS(name, addr, token string, tlsConfig *tls.Config) *Client {
 		token:  token,
 		scheme: "https",
 		http: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: tlsConfig,
-			},
+			Timeout:   30 * time.Second,
+			Transport: peerTransport(tlsConfig),
 		},
 	}
 }
