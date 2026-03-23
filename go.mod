@@ -20,6 +20,8 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de // indirect
+	github.com/benaskins/axon-loop v0.7.0 // indirect
+	github.com/benaskins/axon-talk v0.5.0 // indirect
 	github.com/benaskins/axon-tool v0.1.7 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
