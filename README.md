@@ -199,3 +199,7 @@ Auto-unseal: if the server is sealed and `unseal_file` is configured, aurelia au
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.
+
+## Links
+
+[![Hypercommit](https://img.shields.io/badge/Hypercommit-DB2475)](https://hypercommit.com/aurelia)
