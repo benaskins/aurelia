@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -373,6 +375,52 @@ func (d *Daemon) StopService(name string, timeout time.Duration) error {
 	err := ms.Stop(timeout)
 	d.regenerateRouting()
 	return err
+}
+
+// RemoveService stops a service, archives its spec file, and removes it from the daemon.
+func (d *Daemon) RemoveService(name string, timeout time.Duration) error {
+	// Stop the service first (includes cascade logic)
+	if err := d.StopService(name, timeout); err != nil {
+		return err
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Archive the spec file
+	specFile := filepath.Join(d.specDir, name+".yaml")
+	if _, err := os.Stat(specFile); os.IsNotExist(err) {
+		// Try .yml extension
+		specFile = filepath.Join(d.specDir, name+".yml")
+	}
+
+	if _, err := os.Stat(specFile); err == nil {
+		archiveDir := filepath.Join(d.specDir, "archive")
+		if err := os.MkdirAll(archiveDir, 0755); err != nil {
+			return fmt.Errorf("creating archive directory: %w", err)
+		}
+		archivePath := filepath.Join(archiveDir, filepath.Base(specFile))
+		if err := os.Rename(specFile, archivePath); err != nil {
+			return fmt.Errorf("archiving spec file: %w", err)
+		}
+		d.logger.Info("archived spec file", "service", name, "path", archivePath)
+	}
+
+	// Remove from in-memory state
+	d.ports.Release(name)
+	delete(d.services, name)
+	if d.deps != nil {
+		d.deps.remove(name)
+	}
+
+	// Update state file
+	if err := d.state.remove(name); err != nil {
+		d.logger.Warn("failed to remove service from state file", "service", name, "error", err)
+	}
+
+	d.regenerateRoutingLocked(nil)
+	d.logger.Info("removed service", "service", name)
+	return nil
 }
 
 // RestartService stops and restarts a service.

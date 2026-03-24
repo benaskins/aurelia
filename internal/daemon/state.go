@@ -96,6 +96,18 @@ func (sf *stateFile) set(name string, rec ServiceRecord) error {
 	return sf.saveUnsafe(records)
 }
 
+func (sf *stateFile) remove(name string) error {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+
+	records, err := sf.loadUnsafe()
+	if err != nil || records == nil {
+		return nil
+	}
+	delete(records, name)
+	return sf.saveUnsafe(records)
+}
+
 // loadUnsafe reads without locking — caller must hold sf.mu.
 func (sf *stateFile) loadUnsafe() (map[string]ServiceRecord, error) {
 	data, err := os.ReadFile(sf.path)

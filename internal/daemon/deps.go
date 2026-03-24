@@ -41,6 +41,19 @@ func newDepGraph(specs []*spec.ServiceSpec) *depGraph {
 	return g
 }
 
+// remove deletes a service from the dependency graph.
+func (g *depGraph) remove(name string) {
+	delete(g.specs, name)
+	delete(g.after, name)
+
+	// Remove from requires and dependents
+	for _, dep := range g.requires[name] {
+		g.dependents[dep] = slices.DeleteFunc(g.dependents[dep], func(s string) bool { return s == name })
+	}
+	delete(g.requires, name)
+	delete(g.dependents, name)
+}
+
 // startOrder returns services in dependency order (dependencies first).
 // Returns an error if there's a cycle.
 func (g *depGraph) startOrder() ([]string, error) {

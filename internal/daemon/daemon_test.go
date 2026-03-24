@@ -1140,3 +1140,66 @@ service:
 		t.Errorf("expected empty state file after Stop, got %d records", len(records))
 	}
 }
+
+func TestDaemonRemoveService(t *testing.T) {
+	dir := t.TempDir()
+	writeSpec(t, dir, "removeme.yaml", `
+service:
+  name: removeme
+  type: native
+  command: "sleep 10"
+`)
+	writeSpec(t, dir, "keeper.yaml", `
+service:
+  name: keeper
+  type: native
+  command: "sleep 10"
+`)
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Remove the service
+	if err := d.RemoveService("removeme", 5*time.Second); err != nil {
+		t.Fatalf("RemoveService: %v", err)
+	}
+
+	// Should be gone from in-memory state
+	_, err := d.ServiceState("removeme")
+	if err == nil {
+		t.Error("expected error for removed service")
+	}
+
+	// Other service should still be there
+	state, err := d.ServiceState("keeper")
+	if err != nil {
+		t.Fatalf("keeper should still exist: %v", err)
+	}
+	if state.Name != "keeper" {
+		t.Errorf("expected keeper, got %q", state.Name)
+	}
+
+	// Spec file should be archived, not in the original directory
+	if _, err := os.Stat(filepath.Join(dir, "removeme.yaml")); !os.IsNotExist(err) {
+		t.Error("spec file should have been removed from spec dir")
+	}
+
+	// Spec file should exist in archive subdirectory
+	archiveDir := filepath.Join(dir, "archive")
+	if _, err := os.Stat(filepath.Join(archiveDir, "removeme.yaml")); err != nil {
+		t.Errorf("spec file should exist in archive dir: %v", err)
+	}
+
+	// Removing a non-existent service should error
+	if err := d.RemoveService("nope", 5*time.Second); err == nil {
+		t.Error("expected error for non-existent service")
+	}
+}
