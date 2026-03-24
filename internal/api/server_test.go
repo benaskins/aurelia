@@ -1399,3 +1399,65 @@ dependencies:
 		t.Errorf("expected db.requires=[], got %v", db.Requires)
 	}
 }
+
+func TestRemoveService(t *testing.T) {
+	srv, client := setupTestServer(t, map[string]string{
+		"target.yaml": `
+service:
+  name: target
+  type: native
+  command: "sleep 10"
+`,
+		"keeper.yaml": `
+service:
+  name: keeper
+  type: native
+  command: "sleep 10"
+`,
+	})
+	_ = srv
+
+	// Remove the service
+	req, _ := http.NewRequest("DELETE", "http://aurelia/v1/services/target", nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]string
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result["status"] != "removed" {
+		t.Errorf("expected status=removed, got %q", result["status"])
+	}
+
+	// Service should be gone from list
+	resp2, err := client.Get("http://aurelia/v1/services")
+	if err != nil {
+		t.Fatalf("GET services: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	var services []map[string]any
+	json.NewDecoder(resp2.Body).Decode(&services)
+	for _, s := range services {
+		if s["name"] == "target" {
+			t.Error("removed service should not appear in list")
+		}
+	}
+
+	// Removing non-existent service should 400
+	req2, _ := http.NewRequest("DELETE", "http://aurelia/v1/services/nope", nil)
+	resp3, err := client.Do(req2)
+	if err != nil {
+		t.Fatalf("DELETE non-existent: %v", err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for non-existent, got %d", resp3.StatusCode)
+	}
+}

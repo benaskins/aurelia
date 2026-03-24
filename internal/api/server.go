@@ -70,6 +70,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	mux.HandleFunc("POST /v1/services/{name}/restart", s.restartService)
 	mux.HandleFunc("POST /v1/services/{name}/deploy", s.deployService)
 	mux.HandleFunc("POST /v1/services/{name}/ship", s.shipService)
+	mux.HandleFunc("DELETE /v1/services/{name}", s.removeService)
 	mux.HandleFunc("GET /v1/services/{name}/logs", s.serviceLogs)
 	mux.HandleFunc("GET /v1/graph", s.graph)
 	mux.HandleFunc("POST /v1/reload", s.reload)
@@ -529,6 +530,19 @@ func (s *Server) stopService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping"})
+}
+
+func (s *Server) removeService(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if s.isExternalGuard(w, name, "remove") {
+		return
+	}
+	if err := s.daemon.RemoveService(name, daemon.DefaultStopTimeout); err != nil {
+		s.logger.Error("removeService: failed to remove service", "service", name, "error", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errorMessage("failed to remove service", err, r)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
 func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
