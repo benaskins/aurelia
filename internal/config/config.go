@@ -83,9 +83,67 @@ type Config struct {
 	NodeName      string    `yaml:"node_name,omitempty"`
 	Nodes         []Node    `yaml:"nodes,omitempty"`
 	LaminaRoot    string    `yaml:"lamina_root,omitempty"`
+	SpecSource    string    `yaml:"spec_source,omitempty"` // source spec directory for drift detection
 	TLS           *TLS      `yaml:"tls,omitempty"`
 	OpenBao       *OpenBao  `yaml:"openbao,omitempty"`
 	Diagnose      *Diagnose `yaml:"diagnose,omitempty"`
+}
+
+// SpecSourceDir returns the source spec directory for drift detection.
+// Resolution order:
+//  1. Explicit spec_source config field
+//  2. ${AURELIA_ROOT}/aurelia/services/ (from environment or launchd plist)
+//
+// Returns empty string if the source directory cannot be determined.
+func (c *Config) SpecSourceDir() string {
+	if c.SpecSource != "" {
+		return c.SpecSource
+	}
+	root := os.Getenv("AURELIA_ROOT")
+	if root == "" {
+		root = aureliaRootFromPlist()
+	}
+	if root != "" {
+		return filepath.Join(root, "aurelia", "services")
+	}
+	return ""
+}
+
+// aureliaRootFromPlist reads AURELIA_ROOT from the launchd plist as a fallback
+// when the environment variable is not set (e.g. in interactive shell sessions).
+func aureliaRootFromPlist() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	plist := filepath.Join(home, "Library", "LaunchAgents", "com.aurelia.daemon.plist")
+	data, err := os.ReadFile(plist)
+	if err != nil {
+		return ""
+	}
+	// Simple extraction: find AURELIA_ROOT key followed by a string value.
+	// The plist format is:
+	//   <key>AURELIA_ROOT</key>
+	//   <string>/path/to/root</string>
+	content := string(data)
+	marker := "<key>AURELIA_ROOT</key>"
+	idx := strings.Index(content, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := content[idx+len(marker):]
+	startTag := "<string>"
+	endTag := "</string>"
+	start := strings.Index(rest, startTag)
+	if start < 0 {
+		return ""
+	}
+	rest = rest[start+len(startTag):]
+	end := strings.Index(rest, endTag)
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(rest[:end])
 }
 
 // FindNode returns the node with the given name, or false if not found.
@@ -157,5 +215,6 @@ func Load(path string) (*Config, error) {
 	cfg.RoutingOutput = os.ExpandEnv(cfg.RoutingOutput)
 	cfg.APIAddr = os.ExpandEnv(cfg.APIAddr)
 	cfg.LaminaRoot = os.ExpandEnv(cfg.LaminaRoot)
+	cfg.SpecSource = os.ExpandEnv(cfg.SpecSource)
 	return cfg, nil
 }

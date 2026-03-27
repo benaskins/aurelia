@@ -33,6 +33,7 @@ const (
 type Daemon struct {
 	specDir      string
 	stateDir     string
+	specSource   string // optional: source spec directory for drift detection
 	secrets      keychain.Store
 	routing      *routing.TraefikGenerator
 	ports        *port.Allocator
@@ -98,6 +99,15 @@ func WithRouting(outputPath string) Option {
 	}
 }
 
+// WithSpecSource sets the source spec directory for drift detection.
+// When set, the daemon logs a warning at startup if deployed specs
+// differ from source specs.
+func WithSpecSource(dir string) Option {
+	return func(d *Daemon) {
+		d.specSource = dir
+	}
+}
+
 // Start loads all specs and starts all services in dependency order.
 func (d *Daemon) Start(ctx context.Context) error {
 	d.ctx = ctx
@@ -108,6 +118,26 @@ func (d *Daemon) Start(ctx context.Context) error {
 	}
 
 	d.logger.Info("loaded service specs", "count", len(specs), "dir", d.specDir)
+
+	// Check for stale specs if a source directory is configured
+	if d.specSource != "" {
+		drifted, err := spec.DetectDrift(d.specDir, d.specSource)
+		if err != nil {
+			d.logger.Warn("spec drift check failed", "error", err)
+		} else if len(drifted) > 0 {
+			for _, dr := range drifted {
+				if dr.Changed {
+					d.logger.Warn("deployed spec differs from source", "spec", dr.Name)
+				} else if !dr.DeployedIn {
+					d.logger.Warn("source spec not deployed", "spec", dr.Name)
+				}
+			}
+			d.logger.Warn("service specs out of sync with source",
+				"stale_count", len(drifted),
+				"source", d.specSource,
+				"hint", "run 'just aurelia-sync' to update")
+		}
+	}
 
 	g := newDepGraph(specs)
 	d.mu.Lock()
@@ -143,10 +173,30 @@ func (d *Daemon) Start(ctx context.Context) error {
 		if rec, ok := prevState[name]; ok && rec.Type == "native" && rec.PID > 0 {
 			// Verify the PID still belongs to the expected process (guard against PID reuse)
 			if !driver.VerifyProcess(rec.PID, rec.Command, rec.StartTime) {
-				d.logger.Warn("PID reuse detected, skipping adoption",
+				d.logger.Warn("PID reuse detected, searching for orphaned process",
 					"service", name, "pid", rec.PID,
-					"expected_command", rec.Command,
-					"expected_start_time", rec.StartTime)
+					"expected_command", rec.Command)
+
+				// Search for the actual orphaned process by command pattern
+				if orphanPID := driver.FindProcessByCommand(rec.Command, rec.PID); orphanPID > 0 {
+					d.logger.Info("found orphaned process by command match",
+						"service", name, "orphan_pid", orphanPID, "command", rec.Command)
+					adopted, err := driver.NewAdopted(orphanPID)
+					if err == nil {
+						if err := d.adoptService(ctx, s, adopted); err != nil {
+							d.logger.Error("failed to adopt orphaned process", "service", name, "error", err)
+						} else {
+							d.adopted = append(d.adopted, name)
+							continue
+						}
+					} else {
+						d.logger.Warn("orphaned process disappeared before adoption",
+							"service", name, "orphan_pid", orphanPID)
+					}
+				} else {
+					d.logger.Info("no orphaned process found, will start fresh",
+						"service", name, "stale_pid", rec.PID)
+				}
 			} else {
 				adopted, err := driver.NewAdopted(rec.PID)
 				if err == nil {
@@ -164,6 +214,10 @@ func (d *Daemon) Start(ctx context.Context) error {
 		}
 
 		if err := d.startService(ctx, s); err != nil {
+			// Check if the failure is due to an orphaned process holding a port
+			if d.recoverOrphanedPort(ctx, s, err) {
+				continue
+			}
 			d.logger.Error("failed to start service", "service", name, "error", err)
 			continue
 		}
@@ -578,6 +632,15 @@ func (d *Daemon) ServiceHealthHistory(name string) ([]health.CheckRecord, error)
 	return ms.HealthHistory(), nil
 }
 
+// CheckSpecDrift compares deployed specs against the source directory.
+// Returns nil results if no source directory is configured or directories are in sync.
+func (d *Daemon) CheckSpecDrift() ([]spec.DriftResult, error) {
+	if d.specSource == "" {
+		return nil, nil
+	}
+	return spec.DetectDrift(d.specDir, d.specSource)
+}
+
 // Reload re-reads specs and reconciles: start new, stop removed, restart changed.
 // It uses the daemon's lifecycle context for starting services so they outlive
 // short-lived request contexts.
@@ -842,4 +905,69 @@ func (d *Daemon) redeployAdopted() {
 		}
 	}
 	d.adopted = nil
+}
+
+// recoverOrphanedPort checks if a service start failure is due to an orphaned
+// process holding the service's port. If so, it kills the orphan and retries
+// the start. Returns true if recovery succeeded and the service is now running.
+func (d *Daemon) recoverOrphanedPort(ctx context.Context, s *spec.ServiceSpec, startErr error) bool {
+	if startErr == nil {
+		return false
+	}
+
+	// Determine the port the service needs
+	port := 0
+	if s.Network != nil {
+		port = s.Network.Port
+	}
+	// For dynamic ports, check the allocator
+	if port == 0 && s.NeedsDynamicPort() {
+		port = d.ports.Port(s.Service.Name)
+	}
+	if port <= 0 {
+		return false
+	}
+
+	// Check if something is holding the port
+	holderPID := driver.FindPIDOnPort(port)
+	if holderPID <= 0 {
+		return false
+	}
+
+	// Verify the port holder matches the expected service command
+	name := s.Service.Name
+	if s.Service.Command != "" && !driver.VerifyProcess(holderPID, s.Service.Command, 0) {
+		d.logger.Warn("port held by unrelated process, not killing",
+			"service", name, "port", port, "holder_pid", holderPID)
+		return false
+	}
+
+	d.logger.Warn("killing orphaned process holding port",
+		"service", name, "port", port, "orphan_pid", holderPID)
+
+	// Kill the orphan via an adopted driver for clean shutdown
+	orphan, err := driver.NewAdopted(holderPID)
+	if err != nil {
+		d.logger.Error("orphaned process disappeared before kill",
+			"service", name, "orphan_pid", holderPID)
+		return false
+	}
+
+	if err := orphan.Stop(ctx, 10*time.Second); err != nil {
+		d.logger.Error("failed to kill orphaned process",
+			"service", name, "orphan_pid", holderPID, "error", err)
+		return false
+	}
+
+	d.logger.Info("killed orphaned process, retrying service start",
+		"service", name, "killed_pid", holderPID, "port", port)
+
+	// Retry the start
+	if err := d.startService(ctx, s); err != nil {
+		d.logger.Error("failed to start service after killing orphan",
+			"service", name, "error", err)
+		return false
+	}
+
+	return true
 }

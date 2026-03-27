@@ -29,15 +29,24 @@ var daemonCmd = &cobra.Command{
 var (
 	apiAddr       string
 	routingOutput string
+	daemonForce   bool
 )
 
 func init() {
 	daemonCmd.Flags().StringVar(&apiAddr, "api-addr", "", "Optional TCP address for API (e.g. 127.0.0.1:9090)")
 	daemonCmd.Flags().StringVar(&routingOutput, "routing-output", "", "Path to write Traefik dynamic config (enables routing)")
+	daemonCmd.Flags().BoolVar(&daemonForce, "force", false, "Bypass launchd safety check for manual daemon start")
 	rootCmd.AddCommand(daemonCmd)
 }
 
 func runDaemon(cmd *cobra.Command, args []string) error {
+	// Safety check: warn/block manual starts when a LaunchAgent is installed
+	if warning, err := launchdCheck(daemonForce); err != nil {
+		return err
+	} else if warning != "" {
+		slog.Warn(warning)
+	}
+
 	specDir := defaultSpecDir()
 
 	// Ensure spec directory exists
@@ -101,6 +110,12 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("loading peer TLS config: %w", err)
 		}
 		slog.Info("TLS configured for API and peer connections")
+	}
+
+	// Wire up spec source for drift detection
+	if specSource := cfg.SpecSourceDir(); specSource != "" {
+		opts = append(opts, daemon.WithSpecSource(specSource))
+		slog.Info("spec drift detection enabled", "source", specSource)
 	}
 
 	// Wire up peer nodes from config

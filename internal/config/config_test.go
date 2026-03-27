@@ -399,6 +399,83 @@ func TestLoadNoDiagnoseConfig(t *testing.T) {
 	}
 }
 
+func TestLoadSpecSource(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `spec_source: /opt/infra/aurelia/services
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.SpecSource != "/opt/infra/aurelia/services" {
+		t.Errorf("SpecSource = %q, want %q", cfg.SpecSource, "/opt/infra/aurelia/services")
+	}
+}
+
+func TestLoadSpecSourceExpandsEnv(t *testing.T) {
+	t.Setenv("MY_ROOT", "/opt/myroot")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `spec_source: ${MY_ROOT}/aurelia/services
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.SpecSource != "/opt/myroot/aurelia/services" {
+		t.Errorf("SpecSource = %q, want expanded path", cfg.SpecSource)
+	}
+}
+
+func TestSpecSourceDir(t *testing.T) {
+	// Explicit spec_source takes precedence
+	t.Run("explicit", func(t *testing.T) {
+		t.Setenv("AURELIA_ROOT", "/should/not/use")
+		cfg := &Config{SpecSource: "/explicit/path"}
+		if got := cfg.SpecSourceDir(); got != "/explicit/path" {
+			t.Errorf("SpecSourceDir() = %q, want %q", got, "/explicit/path")
+		}
+	})
+
+	// Falls back to AURELIA_ROOT env var
+	t.Run("aurelia_root_env", func(t *testing.T) {
+		t.Setenv("AURELIA_ROOT", "/opt/aurelia-infra")
+		cfg := &Config{}
+		want := "/opt/aurelia-infra/aurelia/services"
+		if got := cfg.SpecSourceDir(); got != want {
+			t.Errorf("SpecSourceDir() = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestAureliaRootFromPlist(t *testing.T) {
+	// This test verifies the plist parsing logic by checking that
+	// aureliaRootFromPlist returns a non-empty value on macOS when
+	// the launchd plist exists. On CI or other environments, it
+	// gracefully returns empty.
+	result := aureliaRootFromPlist()
+	// We can't assert a specific value since it depends on the machine,
+	// but we can verify it doesn't panic and returns a valid path or empty.
+	if result != "" {
+		if !filepath.IsAbs(result) {
+			t.Errorf("aureliaRootFromPlist() = %q, expected absolute path", result)
+		}
+	}
+}
+
 func TestLoadCommentsOnly(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

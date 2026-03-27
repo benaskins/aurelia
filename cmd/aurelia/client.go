@@ -18,6 +18,7 @@ import (
 	"github.com/benaskins/aurelia/internal/driver"
 	"github.com/benaskins/aurelia/internal/gpu"
 	"github.com/benaskins/aurelia/internal/node"
+	"github.com/benaskins/aurelia/internal/spec"
 	"github.com/spf13/cobra"
 )
 
@@ -215,6 +216,11 @@ var statusCmd = &cobra.Command{
 		if gpuInfo.Name != "" {
 			fmt.Printf("\nGPU: %s | VRAM: %.1f/%.1f GB | Thermal: %s\n",
 				gpuInfo.Name, gpuInfo.AllocatedGB(), gpuInfo.RecommendedMaxGB(), gpuInfo.ThermalState)
+		}
+
+		// Spec drift check (local only, skip for remote queries)
+		if remote == nil {
+			checkSpecDrift()
 		}
 
 		return nil
@@ -688,6 +694,43 @@ var logsCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// checkSpecDrift loads the daemon config, resolves the source spec directory,
+// and prints a warning if any deployed specs have drifted from source.
+func checkSpecDrift() {
+	cfg, err := config.Load(config.DefaultPath())
+	if err != nil {
+		return // config load failure is not fatal for status display
+	}
+	sourceDir := cfg.SpecSourceDir()
+	if sourceDir == "" {
+		return
+	}
+	deployedDir := defaultSpecDir()
+	drifted, err := spec.DetectDrift(deployedDir, sourceDir)
+	if err != nil || len(drifted) == 0 {
+		return
+	}
+
+	changed := 0
+	for _, d := range drifted {
+		if d.Changed {
+			changed++
+		}
+	}
+	missing := len(drifted) - changed
+
+	var parts []string
+	if changed > 0 {
+		parts = append(parts, fmt.Sprintf("%d changed", changed))
+	}
+	if missing > 0 {
+		parts = append(parts, fmt.Sprintf("%d new in source", missing))
+	}
+
+	fmt.Fprintf(os.Stderr, "\nWARNING: %d service spec(s) out of sync with source (%s). Run 'just aurelia-sync' to update.\n",
+		len(drifted), strings.Join(parts, ", "))
 }
 
 func init() {
