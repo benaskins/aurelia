@@ -28,31 +28,39 @@ struct ServiceDetailView: View {
             }
 
             // Log tail
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(logLines.enumerated()), id: \.offset) { index, line in
-                            Text(line)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(LaminaTheme.muted)
-                                .textSelection(.enabled)
-                                .id(index)
-                                .padding(.vertical, 0.5)
+            if logLines.isEmpty {
+                Text("no logs available")
+                    .font(LaminaTheme.monoTiny)
+                    .foregroundStyle(LaminaTheme.dim)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(height: 40)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(logLines.enumerated()), id: \.offset) { index, line in
+                                Text(line)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(LaminaTheme.muted)
+                                    .textSelection(.enabled)
+                                    .id(index)
+                                    .padding(.vertical, 0.5)
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                }
-                .frame(height: 150)
-                .background(Color.black.opacity(0.4))
-                .clipShape(RoundedRectangle(cornerRadius: 3))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 3)
-                        .stroke(LaminaTheme.border, lineWidth: 1)
-                )
-                .onChange(of: logLines.count) {
-                    if let last = logLines.indices.last {
-                        proxy.scrollTo(last, anchor: .bottom)
+                    .frame(height: 150)
+                    .background(Color.black.opacity(0.4))
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(LaminaTheme.border, lineWidth: 1)
+                    )
+                    .onChange(of: logLines.count) {
+                        if let last = logLines.indices.last {
+                            proxy.scrollTo(last, anchor: .bottom)
+                        }
                     }
                 }
             }
