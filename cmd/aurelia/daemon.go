@@ -86,13 +86,13 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
-	// Create and start daemon with secret store
+	// Create daemon — secrets are injected after OpenBao is running
 	stateDir := filepath.Dir(specDir)
-	secrets, err := newSecretStore("daemon")
-	if err != nil {
-		return fmt.Errorf("creating secret store: %w", err)
+	secrets, secretsErr := newSecretStore("daemon")
+	opts := []daemon.Option{daemon.WithStateDir(stateDir)}
+	if secretsErr == nil {
+		opts = append(opts, daemon.WithSecrets(secrets))
 	}
-	opts := []daemon.Option{daemon.WithSecrets(secrets), daemon.WithStateDir(stateDir)}
 	if routingOutput != "" {
 		opts = append(opts, daemon.WithRouting(routingOutput))
 		slog.Info("routing enabled", "output", routingOutput)
@@ -130,6 +130,21 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	d := daemon.NewDaemon(specDir, opts...)
 	if err := d.Start(ctx); err != nil {
 		return fmt.Errorf("starting daemon: %w", err)
+	}
+
+	// If secrets backend wasn't available at startup (e.g., OpenBao not yet
+	// running), wait for it to come up and inject secrets into the daemon.
+	if secretsErr != nil && cfg.OpenBao != nil {
+		slog.Info("secrets backend deferred, waiting for openbao", "error", secretsErr)
+		go func() {
+			secrets, err := waitForSecretStore(ctx, "daemon")
+			if err != nil {
+				slog.Error("deferred secrets backend failed", "error", err)
+				return
+			}
+			d.SetSecrets(secrets)
+			slog.Info("deferred secrets backend connected")
+		}()
 	}
 
 	// Start API server

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/benaskins/aurelia/internal/audit"
 	"github.com/benaskins/aurelia/internal/config"
@@ -74,4 +76,21 @@ func resolveBackend(stateDir string) (keychain.Store, error) {
 	}
 
 	return keychain.NewSystemStore(), nil
+}
+
+// waitForSecretStore retries newSecretStore until it succeeds or the context is cancelled.
+// Used when the daemon starts before OpenBao is ready.
+func waitForSecretStore(ctx context.Context, actor string) (*keychain.AuditedStore, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+			store, err := newSecretStore(actor)
+			if err == nil {
+				return store, nil
+			}
+			slog.Debug("secrets backend not ready, retrying", "error", err)
+		}
+	}
 }

@@ -384,6 +384,15 @@ func (d *Daemon) getService(name string) (*ManagedService, error) {
 	return ms, nil
 }
 
+// SetSecrets sets the secret store after the daemon has started.
+// This allows the daemon to start services (like OpenBao) before the
+// secrets backend is available, then inject secrets for later use.
+func (d *Daemon) SetSecrets(s keychain.Store) {
+	d.mu.Lock()
+	d.secrets = s
+	d.mu.Unlock()
+}
+
 // IsExternal returns true if the named service is an external (unmanaged) service.
 func (d *Daemon) IsExternal(name string) bool {
 	ms, err := d.getService(name)
