@@ -5,77 +5,91 @@ struct ServiceRowView: View {
     let isExpanded: Bool
     let onToggle: () -> Void
     let onAction: (String) -> Void
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
+                // Status dot
                 Circle()
                     .fill(statusColor)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: statusColor.opacity(0.5), radius: service.state == .running ? 3 : 0)
 
+                // Name
                 Text(service.name)
-                    .font(.system(.body, design: .monospaced, weight: .medium))
+                    .font(LaminaTheme.mono)
+                    .foregroundStyle(LaminaTheme.fg)
 
+                // Port
                 if let port = service.port {
                     Text(":\(port)")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .font(LaminaTheme.monoSmall)
+                        .foregroundStyle(LaminaTheme.dim)
                 }
 
                 Spacer()
 
-                Text(service.type)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(.quaternary)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                // Type badge
+                Text(service.type.uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(LaminaTheme.accent)
+                    .tracking(1.5)
 
+                // Action buttons
                 actionButtons
             }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .background(isHovered || isExpanded ? LaminaTheme.panelBgHover : .clear)
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggle)
+            .onHover { isHovered = $0 }
         }
-        .padding(.vertical, 4)
     }
 
     @ViewBuilder
     private var actionButtons: some View {
         switch service.state {
         case .stopped, .failed:
-            Button { onAction("start") } label: {
-                Image(systemName: "play.fill")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
+            ActionButton(icon: "play.fill") { onAction("start") }
         case .running:
-            HStack(spacing: 4) {
-                Button { onAction("restart") } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.caption)
-                }
-                .buttonStyle(.borderless)
-                Button { onAction("stop") } label: {
-                    Image(systemName: "stop.fill")
-                        .font(.caption)
-                }
-                .buttonStyle(.borderless)
+            HStack(spacing: 2) {
+                ActionButton(icon: "arrow.clockwise") { onAction("restart") }
+                ActionButton(icon: "stop.fill") { onAction("stop") }
             }
         case .starting, .stopping:
             ProgressView()
                 .controlSize(.small)
+                .tint(LaminaTheme.muted)
         }
     }
 
     private var statusColor: Color {
         switch (service.state, service.health) {
-        case (.failed, _): .red
-        case (.running, .healthy): .green
-        case (.running, .unhealthy): .orange
-        case (.starting, _), (.stopping, _): .yellow
-        case (.stopped, _): .gray
-        default: .gray
+        case (.failed, _): LaminaTheme.statusError
+        case (.running, .healthy): LaminaTheme.statusOk
+        case (.running, .unhealthy): LaminaTheme.statusWarn
+        case (.starting, _), (.stopping, _): LaminaTheme.statusWarn
+        case (.stopped, _): LaminaTheme.statusOff
+        default: LaminaTheme.statusOff
         }
+    }
+}
+
+private struct ActionButton: View {
+    let icon: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+                .foregroundStyle(isHovered ? LaminaTheme.fg : LaminaTheme.muted)
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }

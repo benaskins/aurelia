@@ -8,10 +8,11 @@ struct ServiceListView: View {
         if !store.isConnected {
             DisconnectedView()
         } else if store.services.isEmpty {
-            Text("No services")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding()
+            Text("NO SERVICES")
+                .font(LaminaTheme.label)
+                .foregroundStyle(LaminaTheme.dim)
+                .tracking(2)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -21,7 +22,7 @@ struct ServiceListView: View {
                                 service: service,
                                 isExpanded: expandedService == service.name,
                                 onToggle: {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                    withAnimation(.easeInOut(duration: 0.15)) {
                                         expandedService = expandedService == service.name ? nil : service.name
                                     }
                                 },
@@ -41,11 +42,12 @@ struct ServiceListView: View {
                                 ServiceDetailView(service: service, store: store)
                             }
 
-                            Divider()
+                            Rectangle()
+                                .fill(LaminaTheme.border)
+                                .frame(height: 1)
                         }
                     }
                 }
-                .padding(.horizontal, 12)
             }
         }
     }
@@ -53,18 +55,18 @@ struct ServiceListView: View {
 
 struct DisconnectedView: View {
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             Image(systemName: "bolt.horizontal.circle")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            Text("Aurelia not running")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-            Text("Waiting for daemon...")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 28, weight: .thin))
+                .foregroundStyle(LaminaTheme.dim)
+            Text("AURELIA NOT RUNNING")
+                .font(LaminaTheme.label)
+                .foregroundStyle(LaminaTheme.dim)
+                .tracking(2)
+            Text("waiting for daemon")
+                .font(LaminaTheme.monoTiny)
+                .foregroundStyle(LaminaTheme.dim)
         }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }

@@ -7,18 +7,45 @@ struct AureliaConsoleApp: App {
     var body: some Scene {
         MenuBarExtra {
             VStack(spacing: 0) {
+                // Header
+                HStack(alignment: .firstTextBaseline) {
+                    Text("AURELIA")
+                        .font(.system(.title3, design: .default, weight: .black))
+                        .foregroundStyle(LaminaTheme.fg)
+                        .tracking(2)
+                    Spacer()
+                    Text("CONSOLE")
+                        .font(LaminaTheme.label)
+                        .foregroundStyle(LaminaTheme.accent)
+                        .tracking(3)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 10)
+
+                Divider()
+                    .overlay(LaminaTheme.border)
+
                 ServiceListView(store: store)
 
                 Divider()
+                    .overlay(LaminaTheme.border)
 
-                Button("Quit AureliaConsole") {
+                Button {
                     NSApplication.shared.terminate(nil)
+                } label: {
+                    Text("QUIT")
+                        .font(LaminaTheme.monoSmall)
+                        .foregroundStyle(LaminaTheme.muted)
+                        .tracking(1)
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.plain)
                 .keyboardShortcut("q")
-                .padding(.vertical, 8)
-                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
-            .frame(width: 380, height: 420)
+            .frame(width: 400, height: 460)
+            .background(LaminaTheme.bg)
             .onAppear { store.startPolling() }
         } label: {
             Image(systemName: statusIcon)
@@ -39,10 +66,10 @@ struct AureliaConsoleApp: App {
 
     private var statusColor: Color {
         switch store.aggregateStatus {
-        case .ok: .green
-        case .warning: .yellow
-        case .error: .red
-        case .disconnected: .gray
+        case .ok: LaminaTheme.statusOk
+        case .warning: LaminaTheme.statusWarn
+        case .error: LaminaTheme.statusError
+        case .disconnected: LaminaTheme.statusOff
         }
     }
 }
