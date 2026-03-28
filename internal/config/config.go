@@ -80,9 +80,10 @@ type OpenBaoPeer struct {
 
 // Diagnose configures the LLM-powered diagnostic engine.
 type Diagnose struct {
-	Provider     string `yaml:"provider"`       // LLM provider: "anthropic", "ollama", "openai"
-	Model        string `yaml:"model"`          // model name, e.g. "claude-sonnet-4-20250514"
-	APIKeySecret string `yaml:"api_key_secret"` // secret name for the API key (resolved via aurelia secret)
+	Provider     string `yaml:"provider"`        // LLM provider: "anthropic", "openai"
+	Model        string `yaml:"model"`           // model name, e.g. "claude-sonnet-4-20250514"
+	APIKeySecret string `yaml:"api_key_secret"`  // secret name for the API key (resolved via aurelia secret)
+	BaseURL      string `yaml:"base_url,omitempty"` // base URL for openai-compatible providers
 }
 
 // Config holds persistent daemon configuration loaded from ~/.aurelia/config.yaml.

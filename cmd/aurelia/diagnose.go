@@ -11,7 +11,7 @@ import (
 
 	talk "github.com/benaskins/axon-talk"
 	"github.com/benaskins/axon-talk/anthropic"
-	"github.com/benaskins/axon-talk/ollama"
+	"github.com/benaskins/axon-talk/openai"
 	"github.com/benaskins/aurelia/internal/config"
 	"github.com/benaskins/aurelia/internal/diagnose"
 	tea "github.com/charmbracelet/bubbletea"
@@ -43,7 +43,7 @@ var diagnoseCmd = &cobra.Command{
 			return fmt.Errorf("resolving API key: %w", err)
 		}
 
-		llm, err := newLLMClient(cfg.Diagnose.Provider, apiKey)
+		llm, err := newLLMClient(cfg.Diagnose.Provider, cfg.Diagnose.BaseURL, apiKey)
 		if err != nil {
 			return err
 		}
@@ -96,14 +96,17 @@ func resolveAPIKey(secretName string) (string, error) {
 	return "", fmt.Errorf("secret %q not found in store and %s not set in environment", secretName, envKey)
 }
 
-func newLLMClient(provider, apiKey string) (talk.LLMClient, error) {
+func newLLMClient(provider, baseURL, apiKey string) (talk.LLMClient, error) {
 	switch provider {
 	case "anthropic":
 		return anthropic.NewClient("https://api.anthropic.com", apiKey), nil
-	case "ollama":
-		return ollama.NewClientFromEnvironment()
+	case "openai":
+		if baseURL == "" {
+			baseURL = "https://api.openai.com"
+		}
+		return openai.NewClient(baseURL, apiKey), nil
 	default:
-		return nil, fmt.Errorf("unsupported diagnose provider %q (supported: anthropic, ollama)", provider)
+		return nil, fmt.Errorf("unsupported diagnose provider %q (supported: anthropic, openai)", provider)
 	}
 }
 
