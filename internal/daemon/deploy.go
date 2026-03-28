@@ -45,6 +45,14 @@ func (d *Daemon) DeployService(name string, drainTimeout time.Duration) error {
 		return d.RestartService(name, DefaultStopTimeout)
 	}
 
+	// Services with a fixed port cannot use blue-green deploy — the new
+	// instance would bind to the same port as the old one. Fall back to
+	// restart, which stops the old instance first.
+	if !ms.spec.NeedsDynamicPort() {
+		d.logger.Info("fixed port service, falling back to restart", "service", name)
+		return d.RestartService(name, DefaultStopTimeout)
+	}
+
 	d.logger.Info("starting blue-green deploy", "service", name)
 
 	// Step 1: Allocate temporary port and start new instance

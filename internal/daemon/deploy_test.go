@@ -256,6 +256,53 @@ service:
 	}
 }
 
+func TestDeployServiceFixedPortFallsBackToRestart(t *testing.T) {
+	dir := t.TempDir()
+
+	writeSpec(t, dir, "fixed.yaml", `
+service:
+  name: fixed
+  type: native
+  command: "sleep 30"
+network:
+  port: 9999
+routing:
+  hostname: fixed.test.internal
+`)
+
+	d := NewDaemon(dir, WithRouting(filepath.Join(t.TempDir(), "routing.yaml")))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer d.Stop(5 * time.Second)
+
+	waitUntil(t, func() bool {
+		s, _ := d.ServiceState("fixed")
+		return s.State == "running"
+	}, 2*time.Second, "fixed to become running")
+
+	pidBefore, _ := d.ServiceState("fixed")
+
+	// Deploy with fixed port should fall back to restart (not blue-green)
+	if err := d.DeployService("fixed", 50*time.Millisecond); err != nil {
+		t.Fatalf("DeployService: %v", err)
+	}
+
+	waitUntil(t, func() bool {
+		s, _ := d.ServiceState("fixed")
+		return s.State == "running" && s.PID != pidBefore.PID
+	}, 2*time.Second, "fixed to restart with new PID")
+
+	// Port should still be the fixed port, not a dynamic one
+	state, _ := d.ServiceState("fixed")
+	if state.Port != 9999 {
+		t.Errorf("expected port 9999 after deploy, got %d", state.Port)
+	}
+}
+
 func TestDeployServiceNotFound(t *testing.T) {
 	dir := t.TempDir()
 	d := NewDaemon(dir)
