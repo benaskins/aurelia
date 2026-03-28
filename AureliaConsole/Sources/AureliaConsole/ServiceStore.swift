@@ -39,24 +39,22 @@ final class ServiceStore {
     private func poll() async {
         do {
             if clusterMode {
-                let graph = try await client.clusterGraph()
-                // Build ServiceInfo from graph nodes for display
-                let clusterServices = try await client.clusterServices()
-                services = clusterServices.sorted {
+                let response = try await client.clusterServices()
+                services = response.services.sorted {
                     if $0.node != $1.node { return ($0.node ?? "") < ($1.node ?? "") }
                     return $0.name < $1.name
                 }
-                peers = graph.peers
-                hasPeers = !graph.peers.isEmpty
+                peers = response.peers
+                hasPeers = !response.peers.isEmpty
             } else {
                 let result = try await client.services()
                 services = result.sorted(by: { $0.name < $1.name })
-            }
-            // Always check for peers so the toggle appears
-            if !hasPeers {
-                if let graph = try? await client.clusterGraph() {
-                    hasPeers = !graph.peers.isEmpty
-                    peers = graph.peers
+                // Check for peers once so the toggle appears
+                if !hasPeers {
+                    if let response = try? await client.clusterServices() {
+                        hasPeers = !response.peers.isEmpty
+                        peers = response.peers
+                    }
                 }
             }
             isConnected = true

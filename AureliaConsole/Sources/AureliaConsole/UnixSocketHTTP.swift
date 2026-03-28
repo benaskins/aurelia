@@ -20,8 +20,8 @@ struct UnixSocketHTTP: Sendable {
                     let httpRequest = "\(method) \(path) HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
                     connection.send(
                         content: Data(httpRequest.utf8),
-                        contentContext: .defaultMessage,
-                        isComplete: false,
+                        contentContext: .finalMessage,
+                        isComplete: true,
                         completion: .contentProcessed { error in
                             if let error {
                                 connection.cancel()

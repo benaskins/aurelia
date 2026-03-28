@@ -41,6 +41,11 @@ struct ErrorResponse: Codable, Sendable {
     let error: String
 }
 
+struct ClusterServicesResponse: Codable, Sendable {
+    let services: [ServiceInfo]
+    let peers: [String: String]
+}
+
 struct ClusterGraphResponse: Codable, Sendable {
     let nodes: [GraphNode]
     let peers: [String: String]  // node name -> "ok" | "timeout" | "error" | "unreachable"

@@ -27,9 +27,9 @@ actor AureliaClient {
         }
     }
 
-    func clusterServices() async throws -> [ServiceInfo] {
+    func clusterServices() async throws -> ClusterServicesResponse {
         let data = try await get("/v1/cluster/services")
-        return try JSONDecoder().decode([ServiceInfo].self, from: data)
+        return try JSONDecoder().decode(ClusterServicesResponse.self, from: data)
     }
 
     func clusterGraph() async throws -> ClusterGraphResponse {
