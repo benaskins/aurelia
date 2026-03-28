@@ -4,9 +4,9 @@ import SwiftUI
 enum MenuBarIcon {
     /// Renders a bold "A" as an NSImage tinted with the given color for the menu bar.
     static func make(color: NSColor) -> NSImage {
-        let size = NSSize(width: 18, height: 18)
+        let size = NSSize(width: 22, height: 22)
         let image = NSImage(size: size, flipped: false) { rect in
-            let font = NSFont.systemFont(ofSize: 14, weight: .black)
+            let font = NSFont.systemFont(ofSize: 18, weight: .heavy)
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: color,

@@ -128,7 +128,7 @@ final class ServiceStore {
         services.filter { ($0.node ?? "local") == node }
     }
 
-    enum AggregateStatus {
+    enum AggregateStatus: Hashable {
         case ok, warning, error, disconnected
     }
 
