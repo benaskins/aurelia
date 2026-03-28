@@ -18,11 +18,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
     private let store = ServiceStore()
     private let graphStore = GraphStore()
-    private lazy var graphWindowController = GraphWindowController(graphStore: graphStore)
+    private var graphWindowController: GraphWindowController!
     private var observeTask: Task<Void, Never>?
     private var lastStatus: ServiceStore.AggregateStatus?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        graphWindowController = GraphWindowController(graphStore: graphStore)
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
             button.image = MenuBarIcon.disconnected()
@@ -30,9 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
         }
 
+        // Capture self strongly — AppDelegate lives for the app's lifetime
         let hostingView = NSHostingView(
-            rootView: PopoverContentView(store: store, onOpenGraph: { [weak self] in
-                self?.graphWindowController.showWindow()
+            rootView: PopoverContentView(store: store, onOpenGraph: { [self] in
+                self.popover.performClose(nil)
+                self.graphWindowController.showWindow()
             })
         )
         hostingView.frame = NSRect(x: 0, y: 0, width: 400, height: 460)

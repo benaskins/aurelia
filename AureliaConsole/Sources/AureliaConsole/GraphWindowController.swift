@@ -5,6 +5,7 @@ import SwiftUI
 final class GraphWindowController {
     private var window: NSPanel?
     private let graphStore: GraphStore
+    private var closeObserver: Any?
 
     init(graphStore: GraphStore) {
         self.graphStore = graphStore
@@ -12,6 +13,8 @@ final class GraphWindowController {
 
     func showWindow() {
         if let window, window.isVisible {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate()
             window.makeKeyAndOrderFront(nil)
             return
         }
@@ -32,12 +35,35 @@ final class GraphWindowController {
 
         let hostingView = NSHostingView(rootView: DependencyGraphView(graphStore: graphStore))
         panel.contentView = hostingView
-
         panel.center()
+
+        self.window = panel
+
+        // Become a regular app so macOS lets us foreground the window
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
 
+        // Revert to accessory (hide dock icon) when window closes
+        closeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.windowDidClose()
+            }
+        }
+
         graphStore.startPolling()
-        self.window = panel
+    }
+
+    private func windowDidClose() {
+        if let closeObserver {
+            NotificationCenter.default.removeObserver(closeObserver)
+            self.closeObserver = nil
+        }
+        NSApp.setActivationPolicy(.accessory)
     }
 
     func closeWindow() {

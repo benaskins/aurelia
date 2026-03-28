@@ -47,8 +47,9 @@ final class GraphStore {
     func refresh() async {
         do {
             graphResponse = try await client.clusterGraph()
-            if selectedNode == nil, let first = availableNodes.first {
-                selectedNode = first
+            if selectedNode == nil {
+                // Default to the node with the most dependency edges
+                selectedNode = bestDefaultNode()
             }
         } catch {
             // Silently retry on next poll
@@ -57,8 +58,12 @@ final class GraphStore {
 
     /// Returns the set of services transitively depended on by the given service.
     func transitiveDeps(of service: String) -> Set<String> {
-        guard let nodes = graphResponse?.nodes else { return [] }
-        let nodeMap = Dictionary(uniqueKeysWithValues: nodes.map { ($0.name, $0) })
+        guard let nodes = graphResponse?.nodes, let selected = selectedNode else { return [] }
+        // Filter to selected node to avoid duplicate name collisions across nodes
+        var nodeMap: [String: GraphNode] = [:]
+        for n in nodes where (n.node ?? "local") == selected {
+            nodeMap[n.name] = n
+        }
         var result = Set<String>()
         var queue = [service]
         while !queue.isEmpty {
@@ -71,6 +76,17 @@ final class GraphStore {
             }
         }
         return result
+    }
+
+    private func bestDefaultNode() -> String? {
+        guard let nodes = graphResponse?.nodes else { return availableNodes.first }
+        var edgeCount: [String: Int] = [:]
+        for n in nodes {
+            let node = n.node ?? "local"
+            let deps = (n.requires ?? []).count + (n.after ?? []).count
+            edgeCount[node, default: 0] += deps
+        }
+        return edgeCount.max(by: { $0.value < $1.value })?.key ?? availableNodes.first
     }
 
     // MARK: - Layout Algorithm
