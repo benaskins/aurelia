@@ -17,7 +17,7 @@ actor AureliaClient {
     func logs(service: String, lines: Int = 50) async throws -> [String] {
         let data = try await get("/v1/services/\(service)/logs?n=\(lines)")
         let response = try JSONDecoder().decode(LogResponse.self, from: data)
-        return response.lines
+        return response.lines ?? []
     }
 
     func action(service: String, action: String) async throws {

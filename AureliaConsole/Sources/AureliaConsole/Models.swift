@@ -34,7 +34,7 @@ struct ServiceInfo: Codable, Identifiable, Sendable {
 }
 
 struct LogResponse: Codable, Sendable {
-    let lines: [String]
+    let lines: [String]?
 }
 
 struct ErrorResponse: Codable, Sendable {

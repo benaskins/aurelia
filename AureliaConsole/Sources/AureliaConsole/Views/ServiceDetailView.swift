@@ -79,7 +79,8 @@ struct ServiceDetailView: View {
     private func startLogPolling() {
         logTask = Task {
             while !Task.isCancelled {
-                logLines = await store.logs(service: service.name)
+                let raw = await store.logs(service: service.name)
+                logLines = raw.map { stripANSI($0) }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
@@ -88,5 +89,13 @@ struct ServiceDetailView: View {
     private func stopLogPolling() {
         logTask?.cancel()
         logTask = nil
+    }
+
+    private func stripANSI(_ string: String) -> String {
+        string.replacingOccurrences(
+            of: "\u{1B}\\[[0-9;]*m",
+            with: "",
+            options: .regularExpression
+        )
     }
 }
