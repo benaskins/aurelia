@@ -20,31 +20,22 @@ struct UnixSocketHTTP: Sendable {
                     let httpRequest = "\(method) \(path) HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
                     connection.send(
                         content: Data(httpRequest.utf8),
-                        contentContext: .finalMessage,
-                        isComplete: true,
+                        contentContext: .defaultMessage,
+                        isComplete: false,
                         completion: .contentProcessed { error in
                             if let error {
                                 connection.cancel()
                                 box.resume(continuation, throwing: error)
                                 return
                             }
-                            connection.receiveMessage { data, _, _, error in
-                                connection.cancel()
-                                if let error {
-                                    box.resume(continuation, throwing: error)
-                                    return
-                                }
-                                guard let data else {
-                                    box.resume(continuation, throwing: HTTPError.invalidResponse)
-                                    return
-                                }
-                                do {
-                                    let result = try self.parseResponse(data)
-                                    box.resume(continuation, returning: result)
-                                } catch {
-                                    box.resume(continuation, throwing: error)
-                                }
-                            }
+                            // Read chunks until connection closes
+                            let accumulator = DataAccumulator()
+                            self.readChunks(
+                                connection: connection,
+                                accumulator: accumulator,
+                                box: box,
+                                continuation: continuation
+                            )
                         }
                     )
                 case .failed(let error):
@@ -57,6 +48,41 @@ struct UnixSocketHTTP: Sendable {
                 }
             }
             connection.start(queue: .global())
+        }
+    }
+
+    private func readChunks(
+        connection: NWConnection,
+        accumulator: DataAccumulator,
+        box: ContinuationBox,
+        continuation: CheckedContinuation<(Int, Data), any Error>
+    ) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, isComplete, error in
+            if let data {
+                accumulator.append(data)
+            }
+            if isComplete || error != nil {
+                connection.cancel()
+                let allData = accumulator.data
+                if allData.isEmpty {
+                    box.resume(continuation, throwing: error ?? HTTPError.invalidResponse)
+                } else {
+                    do {
+                        let result = try self.parseResponse(allData)
+                        box.resume(continuation, returning: result)
+                    } catch {
+                        box.resume(continuation, throwing: error)
+                    }
+                }
+                return
+            }
+            // Keep reading
+            self.readChunks(
+                connection: connection,
+                accumulator: accumulator,
+                box: box,
+                continuation: continuation
+            )
         }
     }
 
@@ -107,8 +133,26 @@ struct UnixSocketHTTP: Sendable {
     }
 }
 
+/// Thread-safe accumulator for response data chunks.
+private final class DataAccumulator: @unchecked Sendable {
+    private var _data = Data()
+    private let lock = NSLock()
+
+    func append(_ chunk: Data) {
+        lock.lock()
+        _data.append(chunk)
+        lock.unlock()
+    }
+
+    var data: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return _data
+    }
+}
+
 /// Guards against double-resuming a continuation when NWConnection fires
-/// both receiveMessage completion and a .failed state transition.
+/// both a receive completion and a .failed state transition.
 private final class ContinuationBox: @unchecked Sendable {
     private var resumed = false
     private let lock = NSLock()
