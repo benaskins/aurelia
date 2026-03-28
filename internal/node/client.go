@@ -239,6 +239,30 @@ func (c *Client) Lamina(args []string) (*LaminaResponse, error) {
 	return &resp, nil
 }
 
+// BaoTokenResponse is the response from an OpenBao token vend request.
+type BaoTokenResponse struct {
+	Token     string   `json:"token"`
+	ExpiresAt string   `json:"expires_at"`
+	Policies  []string `json:"policies"`
+}
+
+// RequestBaoToken requests a short-lived, scoped OpenBao token from the remote
+// daemon's token vending endpoint. Requires mTLS authentication — the peer's
+// cert CN determines which policy is applied.
+func (c *Client) RequestBaoToken() (*BaoTokenResponse, error) {
+	body, err := c.postReturnBody("/v1/openbao/token")
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+
+	var resp BaoTokenResponse
+	if err := json.NewDecoder(body).Decode(&resp); err != nil {
+		return nil, fmt.Errorf("decoding bao token from %s: %w", c.Name, err)
+	}
+	return &resp, nil
+}
+
 // PushToken sends a new bearer token to the remote peer for updating its config.
 // This is used during token rotation and requires mTLS authentication.
 func (c *Client) PushToken(nodeName, newToken string) error {

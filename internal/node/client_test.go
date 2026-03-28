@@ -173,3 +173,48 @@ func TestNewUsesHTTP(t *testing.T) {
 		t.Errorf("scheme = %q, want %q", c.scheme, "http")
 	}
 }
+
+func TestClientRequestBaoToken(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/openbao/token" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != "POST" {
+			t.Errorf("method = %q, want POST", r.Method)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"token":      "s.short-lived",
+			"expires_at": "2026-03-28T17:15:00Z",
+			"policies":   []string{"default", "node-hestia"},
+		})
+	}))
+	defer srv.Close()
+
+	c := New("hestia", srv.Listener.Addr().String(), "tok")
+	resp, err := c.RequestBaoToken()
+	if err != nil {
+		t.Fatalf("RequestBaoToken() error: %v", err)
+	}
+	if resp.Token != "s.short-lived" {
+		t.Errorf("token = %q, want %q", resp.Token, "s.short-lived")
+	}
+	if len(resp.Policies) != 2 {
+		t.Errorf("policies = %v, want 2 entries", resp.Policies)
+	}
+}
+
+func TestClientRequestBaoTokenError(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{"error": "unknown node"})
+	}))
+	defer srv.Close()
+
+	c := New("rogue", srv.Listener.Addr().String(), "tok")
+	_, err := c.RequestBaoToken()
+	if err == nil {
+		t.Error("expected error for 403 response")
+	}
+}
