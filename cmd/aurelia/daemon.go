@@ -16,6 +16,7 @@ import (
 	"github.com/benaskins/aurelia/internal/config"
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/gpu"
+	"github.com/benaskins/aurelia/internal/keychain"
 	"github.com/spf13/cobra"
 )
 
@@ -159,6 +160,26 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	if cfg.LaminaRoot != "" {
 		srv.SetLaminaRoot(cfg.LaminaRoot)
 		slog.Info("lamina workspace configured", "root", cfg.LaminaRoot)
+	}
+
+	// Wire up OpenBao token vending if configured
+	if cfg.OpenBao != nil && len(cfg.Nodes) > 0 {
+		baoToken, err := cfg.OpenBao.LoadToken()
+		if err == nil {
+			mount := cfg.OpenBao.Mount
+			if mount == "" {
+				mount = "secret"
+			}
+			var baoOpts []keychain.BaoOption
+			if cfg.OpenBao.UnsealFile != "" {
+				baoOpts = append(baoOpts, keychain.WithUnsealFile(cfg.OpenBao.UnsealFile))
+			}
+			baoStore := keychain.NewBaoStore(cfg.OpenBao.Addr, baoToken, mount, baoOpts...)
+			srv.SetTokenVendor(keychain.NewBaoTokenVendor(baoStore), cfg.Nodes)
+			slog.Info("openbao token vending enabled", "nodes", len(cfg.Nodes))
+		} else {
+			slog.Warn("openbao token vending disabled: token not available", "error", err)
+		}
 	}
 
 	// Start API in background

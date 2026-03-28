@@ -24,6 +24,7 @@ import (
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/gpu"
 	"github.com/benaskins/aurelia/internal/health"
+	"github.com/benaskins/aurelia/internal/keychain"
 	"github.com/benaskins/aurelia/internal/node"
 	"github.com/benaskins/aurelia/internal/sysinfo"
 )
@@ -46,7 +47,9 @@ type Server struct {
 	nodeName    string // local node name for stamping on service states
 	laminaRoot  string // workspace root for lamina CLI execution
 	configPath  string // path to config file for token updates
-	rateLimiter *rateLimitMiddleware
+	rateLimiter  *rateLimitMiddleware
+	tokenVendor  *keychain.BaoTokenVendor
+	knownNodes   map[string]bool // valid peer CNs for token vending
 }
 
 // NewServer creates an API server backed by the given daemon.
@@ -91,6 +94,9 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 
 	// Peer token distribution (mTLS-only)
 	mux.HandleFunc("POST /v1/peer/token", s.peerTokenUpdate)
+
+	// OpenBao token vending (mTLS-only)
+	mux.HandleFunc("POST /v1/openbao/token", s.openbaoToken)
 
 	// Web UI — serve embedded static files
 	uiContent, _ := fs.Sub(uiFS, "ui")
@@ -673,6 +679,59 @@ func (s *Server) SetNodeName(name string) {
 // SetLaminaRoot sets the workspace root for lamina CLI execution.
 func (s *Server) SetLaminaRoot(root string) {
 	s.laminaRoot = root
+}
+
+// SetTokenVendor configures the OpenBao token vendor and the set of known
+// node names that are allowed to request scoped tokens.
+func (s *Server) SetTokenVendor(vendor *keychain.BaoTokenVendor, nodes []config.Node) {
+	s.tokenVendor = vendor
+	s.knownNodes = make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		s.knownNodes[n.Name] = true
+	}
+}
+
+// openbaoToken handles scoped token vending for authenticated peers.
+// Requires mTLS — the peer CN must match a known node name.
+// Returns a short-lived OpenBao token with policy "node-{CN}".
+func (s *Server) openbaoToken(w http.ResponseWriter, r *http.Request) {
+	peer := PeerIdentity(r.Context())
+	if peer == "" || peer == "cli" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "token vending requires mTLS authentication",
+		})
+		return
+	}
+
+	if s.tokenVendor == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "token vending not configured",
+		})
+		return
+	}
+
+	if !s.knownNodes[peer] {
+		s.logger.Warn("token vend rejected: unknown node", "peer", peer)
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": fmt.Sprintf("unknown node %q", peer),
+		})
+		return
+	}
+
+	policy := "node-" + peer
+	ttl := 60 * time.Second
+
+	resp, err := s.tokenVendor.VendToken([]string{policy}, ttl)
+	if err != nil {
+		s.logger.Error("token vend failed", "peer", peer, "error", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "failed to create token",
+		})
+		return
+	}
+
+	s.logger.Info("token vended", "peer", peer, "policy", policy, "ttl", ttl)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 const clusterAggregationTimeout = 10 * time.Second
