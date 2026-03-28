@@ -55,28 +55,17 @@ struct AureliaConsoleApp: App {
             .background(LaminaTheme.bg)
             .onAppear { store.startPolling() }
         } label: {
-            Image(systemName: statusIcon)
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(statusColor)
+            Image(nsImage: statusImage)
         }
         .menuBarExtraStyle(.window)
     }
 
-    private var statusIcon: String {
+    private var statusImage: NSImage {
         switch store.aggregateStatus {
-        case .ok: "circle.fill"
-        case .warning: "exclamationmark.circle.fill"
-        case .error: "xmark.circle.fill"
-        case .disconnected: "circle.dashed"
-        }
-    }
-
-    private var statusColor: Color {
-        switch store.aggregateStatus {
-        case .ok: LaminaTheme.statusOk
-        case .warning: LaminaTheme.statusWarn
-        case .error: LaminaTheme.statusError
-        case .disconnected: LaminaTheme.statusOff
+        case .ok: MenuBarIcon.ok()
+        case .warning: MenuBarIcon.warning()
+        case .error: MenuBarIcon.error()
+        case .disconnected: MenuBarIcon.disconnected()
         }
     }
 }
