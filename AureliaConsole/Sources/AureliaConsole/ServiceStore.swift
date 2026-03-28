@@ -87,8 +87,11 @@ final class ServiceStore {
         await performAction(service: service, action: "restart")
     }
 
-    func logs(service: String) async -> [String] {
+    func logs(service: String, node: String? = nil) async -> [String] {
         do {
+            if clusterMode, let node {
+                return try await client.clusterLogs(service: service, node: node)
+            }
             return try await client.logs(service: service)
         } catch {
             return ["Error fetching logs: \(error.localizedDescription)"]

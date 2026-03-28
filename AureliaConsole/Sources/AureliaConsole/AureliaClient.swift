@@ -37,6 +37,12 @@ actor AureliaClient {
         return try JSONDecoder().decode(ClusterGraphResponse.self, from: data)
     }
 
+    func clusterLogs(service: String, node: String, lines: Int = 50) async throws -> [String] {
+        let data = try await get("/v1/cluster/services/\(service)/logs?node=\(node)&n=\(lines)")
+        let response = try JSONDecoder().decode(LogResponse.self, from: data)
+        return response.lines ?? []
+    }
+
     func clusterAction(service: String, action: String, node: String) async throws {
         let data = try await post("/v1/cluster/services/\(service)/\(action)?node=\(node)")
         if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {

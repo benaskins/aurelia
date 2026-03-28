@@ -87,7 +87,7 @@ struct ServiceDetailView: View {
     private func startLogPolling() {
         logTask = Task {
             while !Task.isCancelled {
-                let raw = await store.logs(service: service.name)
+                let raw = await store.logs(service: service.name, node: service.node)
                 logLines = raw.map { stripANSI($0) }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
