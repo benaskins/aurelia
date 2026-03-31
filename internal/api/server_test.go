@@ -23,7 +23,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benaskins/aurelia/internal/config"
 	"github.com/benaskins/aurelia/internal/daemon"
+	"github.com/benaskins/aurelia/internal/keychain"
 	"github.com/benaskins/aurelia/internal/node"
 )
 
@@ -1142,6 +1144,109 @@ func TestPeerTokenUpdateRequiresMTLS(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("expected 403 for CLI client, got %d", resp.StatusCode)
+	}
+}
+
+func TestPKIRenewEndpoint(t *testing.T) {
+	certs := generateTestCerts(t, "hestia")
+
+	d := daemon.NewDaemon(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("daemon start: %v", err)
+	}
+	t.Cleanup(func() { d.Stop(5 * time.Second) })
+
+	// Fake PKI issuer backed by httptest
+	pkiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PUT" || r.URL.Path != "/v1/pki_lamina/issue/node" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body struct {
+			CommonName string `json:"common_name"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"certificate":   "-----BEGIN CERTIFICATE-----\nrenewed-cert-for-" + body.CommonName + "\n-----END CERTIFICATE-----",
+				"private_key":   "-----BEGIN EC PRIVATE KEY-----\nrenewed-key\n-----END EC PRIVATE KEY-----",
+				"ca_chain":      []string{"-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----"},
+				"serial_number": "aa:bb:cc",
+				"expiration":    time.Now().Add(72 * time.Hour).Unix(),
+			},
+		})
+	}))
+	defer pkiSrv.Close()
+
+	baoStore := keychain.NewBaoStore(pkiSrv.URL, "test-token", "secret")
+	pkiIssuer := keychain.NewBaoPKIIssuer(baoStore, "pki_lamina")
+
+	srv := NewServer(d, nil)
+	tokenPath := filepath.Join(t.TempDir(), "api.token")
+	srv.GenerateToken(tokenPath)
+	srv.SetPKIIssuer(pkiIssuer, []config.Node{
+		{Name: "hestia"},
+		{Name: "limen"},
+	})
+
+	serverTLS, _ := LoadTLSConfig(certs.ServerCertPath, certs.ServerKeyPath, certs.CAPath)
+	ln, _ := tls.Listen("tcp", "127.0.0.1:0", serverTLS)
+	addr := ln.Addr().String()
+
+	srv.tcpServer = &http.Server{
+		Handler: srv.rateLimiter.handler(srv.requireAuth(srv.auditLog(srv.server.Handler))),
+	}
+	go srv.tcpServer.Serve(ln)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	caPEM, _ := os.ReadFile(certs.CAPath)
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caPEM)
+
+	// Test 1: mTLS client (CN=hestia) should get a cert
+	clientCert, _ := tls.LoadX509KeyPair(certs.ClientCertPath, certs.ClientKeyPath)
+	mtlsClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates: []tls.Certificate{clientCert},
+				RootCAs:      caPool,
+			},
+		},
+	}
+	resp, err := mtlsClient.Post("https://"+addr+"/v1/pki/renew", "", nil)
+	if err != nil {
+		t.Fatalf("mTLS POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var result keychain.IssuedCert
+	json.NewDecoder(resp.Body).Decode(&result)
+	if !strings.Contains(result.Certificate, "renewed-cert-for-hestia") {
+		t.Errorf("certificate = %q, expected it to contain CN from peer cert", result.Certificate)
+	}
+
+	// Test 2: bearer token client should be forbidden
+	tokenBytes, _ := os.ReadFile(tokenPath)
+	req, _ := http.NewRequest("POST", "https://"+addr+"/v1/pki/renew", nil)
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tokenBytes)))
+	bearerClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: caPool},
+		},
+	}
+	resp2, err := bearerClient.Do(req)
+	if err != nil {
+		t.Fatalf("bearer POST: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 for bearer client, got %d", resp2.StatusCode)
 	}
 }
 

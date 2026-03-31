@@ -50,6 +50,7 @@ type Server struct {
 	rateLimiter  *rateLimitMiddleware
 	tokenVendor  *keychain.BaoTokenVendor
 	knownNodes   map[string]bool // valid peer CNs for token vending
+	pkiIssuer    *keychain.BaoPKIIssuer
 }
 
 // NewServer creates an API server backed by the given daemon.
@@ -97,6 +98,9 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 
 	// OpenBao token vending (mTLS-only)
 	mux.HandleFunc("POST /v1/openbao/token", s.openbaoToken)
+
+	// PKI cert renewal (mTLS-only)
+	mux.HandleFunc("POST /v1/pki/renew", s.pkiRenew)
 
 	// Web UI — serve embedded static files
 	uiContent, _ := fs.Sub(uiFS, "ui")
@@ -749,6 +753,59 @@ func (s *Server) openbaoToken(w http.ResponseWriter, r *http.Request) {
 
 	s.logger.Info("token vended", "peer", peer, "policy", policy, "ttl", ttl)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// SetPKIIssuer configures the PKI certificate issuer and the set of known
+// node names that are allowed to renew certificates.
+func (s *Server) SetPKIIssuer(issuer *keychain.BaoPKIIssuer, nodes []config.Node) {
+	s.pkiIssuer = issuer
+	// Ensure knownNodes is initialized (may already be set by SetTokenVendor)
+	if s.knownNodes == nil {
+		s.knownNodes = make(map[string]bool, len(nodes))
+	}
+	for _, n := range nodes {
+		s.knownNodes[n.Name] = true
+	}
+}
+
+// pkiRenew handles certificate renewal for authenticated peers.
+// Requires mTLS — the peer CN must match a known node name.
+// Issues a new node cert via the PKI secrets engine and returns it.
+func (s *Server) pkiRenew(w http.ResponseWriter, r *http.Request) {
+	peer := PeerIdentity(r.Context())
+	if peer == "" || peer == "cli" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "certificate renewal requires mTLS authentication",
+		})
+		return
+	}
+
+	if s.pkiIssuer == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "PKI issuer not configured",
+		})
+		return
+	}
+
+	if !s.knownNodes[peer] {
+		s.logger.Warn("pki renew rejected: unknown node", "peer", peer)
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": fmt.Sprintf("unknown node %q", peer),
+		})
+		return
+	}
+
+	cert, err := s.pkiIssuer.IssueNodeCert(peer, "72h")
+	if err != nil {
+		s.logger.Error("pki renew failed", "peer", peer, "error", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "failed to issue certificate",
+		})
+		return
+	}
+
+	s.logger.Info("pki cert renewed", "peer", peer, "serial", cert.Serial)
+	writeJSON(w, http.StatusOK, cert)
 }
 
 const clusterAggregationTimeout = 10 * time.Second
