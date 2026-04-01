@@ -13,8 +13,7 @@ import (
 
 // mockLLMClient simulates an LLM that calls list_services then responds.
 type mockLLMClient struct {
-	calls    int
-	maxCalls int
+	calls int
 }
 
 func (m *mockLLMClient) Chat(ctx context.Context, req *talk.Request, fn func(talk.Response) error) error {

@@ -45,11 +45,6 @@ var (
 			Foreground(lipgloss.Color("9")).
 			Bold(true)
 
-	inputBorderStyle = lipgloss.NewStyle().
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderTop(true).
-				BorderForeground(lipgloss.Color("8"))
-
 	statusBarStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("8"))
 
