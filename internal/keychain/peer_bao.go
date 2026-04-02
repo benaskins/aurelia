@@ -70,3 +70,20 @@ func (p *PeerBaoStore) Set(key, value string) error {
 func (p *PeerBaoStore) Delete(key string) error {
 	return fmt.Errorf("peer secret store is read-only")
 }
+
+// PKIIssuer returns a BaoPKIIssuer for the given mount, using the same
+// token vending mechanism as the secret store.
+func (p *PeerBaoStore) PKIIssuer(mount string) *BaoPKIIssuer {
+	pkiStore := NewBaoStore(p.store.addr, "", mount)
+	return &BaoPKIIssuer{
+		store: pkiStore,
+		mount: mount,
+		preRequest: func() error {
+			if err := p.ensureToken(); err != nil {
+				return err
+			}
+			pkiStore.token = p.store.token
+			return nil
+		},
+	}
+}

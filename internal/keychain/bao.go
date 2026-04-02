@@ -45,6 +45,13 @@ func NewBaoStore(addr, token, mount string, opts ...BaoOption) *BaoStore {
 	return s
 }
 
+// PKIIssuer returns a BaoPKIIssuer for the given mount, reusing this
+// store's address and token.
+func (s *BaoStore) PKIIssuer(mount string) *BaoPKIIssuer {
+	pkiStore := NewBaoStore(s.addr, s.token, mount)
+	return &BaoPKIIssuer{store: pkiStore, mount: mount}
+}
+
 func (s *BaoStore) do(method, path string, body io.Reader) (*http.Response, error) {
 	req, err := http.NewRequest(method, s.addr+path, body)
 	if err != nil {
