@@ -173,6 +173,34 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Service cert auto-renewal from config
+	if len(cfg.ServiceCerts) > 0 {
+		var adytonPeer *node.Client
+		for _, p := range peers {
+			if p.Name == "adyton" {
+				adytonPeer = p
+				break
+			}
+		}
+		if adytonPeer != nil {
+			serviceCerts := make([]daemon.ServiceCert, len(cfg.ServiceCerts))
+			for i, sc := range cfg.ServiceCerts {
+				certDir := os.ExpandEnv(sc.CertDir)
+				serviceCerts[i] = daemon.ServiceCert{
+					Role: sc.Role, CN: sc.CN, TTL: sc.TTL,
+					CertDir: certDir, IsClient: sc.IsClient,
+				}
+			}
+			scr := daemon.NewServiceCertRenewal(serviceCerts, adytonPeer, func() {
+				slog.Info("service certs renewed, traefik will pick up new files via file watcher")
+			})
+			opts = append(opts, daemon.WithServiceCertRenewal(scr))
+			slog.Info("service cert auto-renewal enabled", "certs", len(serviceCerts))
+		} else {
+			slog.Warn("service_certs configured but no adyton peer found — auto-renewal disabled")
+		}
+	}
+
 	d := daemon.NewDaemon(specDir, opts...)
 	if err := d.Start(ctx); err != nil {
 		return fmt.Errorf("starting daemon: %w", err)

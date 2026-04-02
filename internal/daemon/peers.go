@@ -32,6 +32,13 @@ func WithCertRenewal(cr *CertRenewal) Option {
 	}
 }
 
+// WithServiceCertRenewal enables automatic service certificate renewal.
+func WithServiceCertRenewal(scr *ServiceCertRenewal) Option {
+	return func(d *Daemon) {
+		d.serviceCertRenewal = scr
+	}
+}
+
 // BuildPeers creates node.Client instances from config, excluding the local node.
 // If tlsConfig is non-nil, peers connect over TLS with the provided client cert.
 func BuildPeers(cfg *config.Config, tlsConfig *tls.Config) []*node.Client {
@@ -75,7 +82,7 @@ func (d *Daemon) Peers() map[string]*node.Client {
 // startPeerLiveness launches a goroutine that periodically pings all peers
 // and checks certificate renewal.
 func (d *Daemon) startPeerLiveness(ctx context.Context) {
-	if len(d.peers) == 0 && d.certRenewal == nil {
+	if len(d.peers) == 0 && d.certRenewal == nil && d.serviceCertRenewal == nil {
 		return
 	}
 	go func() {
@@ -92,6 +99,9 @@ func (d *Daemon) startPeerLiveness(ctx context.Context) {
 				}
 				if d.certRenewal != nil {
 					d.certRenewal.CheckAndRenew()
+				}
+				if d.serviceCertRenewal != nil {
+					d.serviceCertRenewal.CheckAndRenew()
 				}
 			case <-ctx.Done():
 				return

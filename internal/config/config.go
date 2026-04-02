@@ -86,6 +86,15 @@ type Diagnose struct {
 	BaseURL      string `yaml:"base_url,omitempty"` // base URL for openai-compatible providers
 }
 
+// ServiceCertConfig describes a TLS certificate to auto-renew via the CA peer.
+type ServiceCertConfig struct {
+	Role     string `yaml:"role"`      // PKI role (server, client)
+	CN       string `yaml:"cn"`        // common name
+	TTL      string `yaml:"ttl"`       // requested TTL (e.g. "720h", "24h")
+	CertDir  string `yaml:"cert_dir"`  // directory for cert files
+	IsClient bool   `yaml:"is_client"` // true for client certs (client.crt), false for server (cert.crt)
+}
+
 // Config holds persistent daemon configuration loaded from ~/.aurelia/config.yaml.
 type Config struct {
 	RoutingOutput string    `yaml:"routing_output"`
@@ -94,10 +103,11 @@ type Config struct {
 	Nodes         []Node    `yaml:"nodes,omitempty"`
 	LaminaRoot    string    `yaml:"lamina_root,omitempty"`
 	SpecSource    string    `yaml:"spec_source,omitempty"` // source spec directory for drift detection
-	TLS           *TLS         `yaml:"tls,omitempty"`
-	OpenBao       *OpenBao     `yaml:"openbao,omitempty"`
-	OpenBaoPeer   *OpenBaoPeer `yaml:"openbao_peer,omitempty"`
-	Diagnose      *Diagnose    `yaml:"diagnose,omitempty"`
+	TLS           *TLS                `yaml:"tls,omitempty"`
+	OpenBao       *OpenBao            `yaml:"openbao,omitempty"`
+	OpenBaoPeer   *OpenBaoPeer        `yaml:"openbao_peer,omitempty"`
+	Diagnose      *Diagnose           `yaml:"diagnose,omitempty"`
+	ServiceCerts  []ServiceCertConfig `yaml:"service_certs,omitempty"`
 }
 
 // SpecSourceDir returns the source spec directory for drift detection.
