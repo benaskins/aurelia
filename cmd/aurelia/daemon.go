@@ -251,6 +251,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		slog.Info("lamina workspace configured", "root", cfg.LaminaRoot)
 	}
 
+	// Wire up secret cache for local socket lookups
+	if secretsErr == nil {
+		cache := keychain.NewCachedStore(secrets, 5*time.Minute)
+		srv.SetSecretCache(cache)
+		if n, err := cache.Warm(); err == nil && n > 0 {
+			slog.Info("secret cache warmed", "count", n)
+		}
+	}
+
 	// Wire up OpenBao token vending if configured
 	if cfg.OpenBao != nil && len(cfg.Nodes) > 0 {
 		baoToken, err := cfg.OpenBao.LoadToken()
