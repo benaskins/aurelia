@@ -91,6 +91,10 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	// Secret cache (local socket)
 	mux.HandleFunc("GET /v1/secrets/{key}", s.secretGet)
 
+	// Tessera: bulk secret fetch and cache invalidation (mTLS-only)
+	mux.HandleFunc("GET /v1/secrets", s.secretsList)
+	mux.HandleFunc("POST /v1/cache/invalidate", s.cacheInvalidate)
+
 	// Lamina workspace CLI execution
 	mux.HandleFunc("POST /v1/lamina", s.laminaExec)
 

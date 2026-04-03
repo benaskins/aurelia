@@ -310,6 +310,30 @@ func (c *Client) IssueCert(role, commonName, ttl string) (*RenewCertResponse, er
 	return &resp, nil
 }
 
+// RequestSecrets fetches all secrets from the remote daemon's bulk endpoint.
+// Requires mTLS authentication. Returns a key→value map.
+func (c *Client) RequestSecrets() (map[string]string, error) {
+	body, err := c.get("/v1/secrets")
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+
+	var secrets map[string]string
+	if err := json.NewDecoder(body).Decode(&secrets); err != nil {
+		return nil, fmt.Errorf("decoding secrets from %s: %w", c.Name, err)
+	}
+	return secrets, nil
+}
+
+// InvalidateCache pushes a cache invalidation to the remote daemon.
+// If key is empty, all cached secrets are invalidated.
+// Requires mTLS authentication.
+func (c *Client) InvalidateCache(key string) error {
+	_, err := c.postJSON("/v1/cache/invalidate", map[string]string{"key": key})
+	return err
+}
+
 // PushToken sends a new bearer token to the remote peer for updating its config.
 // This is used during token rotation and requires mTLS authentication.
 func (c *Client) PushToken(nodeName, newToken string) error {
