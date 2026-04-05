@@ -1541,7 +1541,7 @@ func TestKillOrphanOnPortUnrelatedProcess(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("starting nc: %v", err)
 	}
-	go cmd.Wait() //nolint:errcheck
+	go cmd.Wait()
 	t.Cleanup(func() { cmd.Process.Kill() })
 
 	// Wait until nc is actually listening.
@@ -1601,7 +1601,7 @@ func TestKillOrphanOnPortKnownNameMatch(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("starting nc: %v", err)
 	}
-	go cmd.Wait() //nolint:errcheck
+	go cmd.Wait()
 	t.Cleanup(func() { cmd.Process.Kill() })
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -1665,7 +1665,7 @@ func TestKillOrphanOnPortMatchingProcess(t *testing.T) {
 		t.Fatalf("starting nc: %v", err)
 	}
 	// Reap the child so it doesn't become a zombie — we check port release, not PID death.
-	go cmd.Wait() //nolint:errcheck
+	go cmd.Wait()
 	t.Cleanup(func() { cmd.Process.Kill() })
 
 	// Wait until nc is actually listening (up to 3 seconds).
