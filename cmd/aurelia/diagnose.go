@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/benaskins/aurelia/internal/config"
+	"github.com/benaskins/aurelia/internal/diagnose"
 	talk "github.com/benaskins/axon-talk"
 	"github.com/benaskins/axon-talk/anthropic"
 	"github.com/benaskins/axon-talk/openai"
-	"github.com/benaskins/aurelia/internal/config"
-	"github.com/benaskins/aurelia/internal/diagnose"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )

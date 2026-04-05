@@ -475,4 +475,3 @@ func (c *Cluster) waitForPeerDiscovery(t *testing.T, timeout time.Duration) {
 	}
 	t.Fatalf("peer discovery did not complete within %s", timeout)
 }
-

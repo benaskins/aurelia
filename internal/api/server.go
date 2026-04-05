@@ -47,11 +47,11 @@ type Server struct {
 	nodeName    string // local node name for stamping on service states
 	laminaRoot  string // workspace root for lamina CLI execution
 	configPath  string // path to config file for token updates
-	rateLimiter  *rateLimitMiddleware
-	tokenVendor  *keychain.BaoTokenVendor
-	knownNodes   map[string]bool // valid peer CNs for token vending
-	pkiIssuer    *keychain.BaoPKIIssuer
-	secretCache  *keychain.CachedStore
+	rateLimiter *rateLimitMiddleware
+	tokenVendor *keychain.BaoTokenVendor
+	knownNodes  map[string]bool // valid peer CNs for token vending
+	pkiIssuer   *keychain.BaoPKIIssuer
+	secretCache *keychain.CachedStore
 }
 
 // NewServer creates an API server backed by the given daemon.
@@ -510,8 +510,8 @@ func (s *Server) serviceHealth(w http.ResponseWriter, r *http.Request) {
 	history, _ := s.daemon.ServiceHealthHistory(name)
 
 	type healthResponse struct {
-		Status  string                `json:"status"`
-		History []health.CheckRecord  `json:"history"`
+		Status  string               `json:"status"`
+		History []health.CheckRecord `json:"history"`
 	}
 	writeJSON(w, http.StatusOK, healthResponse{
 		Status:  string(state.Health),

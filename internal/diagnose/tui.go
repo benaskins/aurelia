@@ -359,7 +359,7 @@ func (m *TUIModel) refreshViewport() {
 			sb.WriteString("\n\n")
 		case "agent":
 			sb.WriteString(agentLabelStyle.Render("aurelia") + " ")
-			sb.WriteString(agentStyle.Width(contentWidth-9).Render(e.content))
+			sb.WriteString(agentStyle.Width(contentWidth - 9).Render(e.content))
 			sb.WriteString("\n\n")
 		case "tool":
 			sb.WriteString(toolStyle.Render(e.content))
@@ -373,7 +373,7 @@ func (m *TUIModel) refreshViewport() {
 	if m.streaming != "" || m.toolRunning {
 		sb.WriteString(agentLabelStyle.Render("aurelia") + " ")
 		if m.streaming != "" {
-			sb.WriteString(agentStyle.Width(contentWidth-9).Render(m.streaming))
+			sb.WriteString(agentStyle.Width(contentWidth - 9).Render(m.streaming))
 		}
 		if m.toolRunning {
 			sb.WriteString(m.spinner.View())

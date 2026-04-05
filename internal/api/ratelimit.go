@@ -80,4 +80,3 @@ func (rl *rateLimitMiddleware) cleanup() {
 		})
 	}
 }
-

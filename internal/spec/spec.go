@@ -41,7 +41,7 @@ type Service struct {
 	Image       string  `yaml:"image,omitempty"`        // container only
 	NetworkMode string  `yaml:"network_mode,omitempty"` // container only, default "host"
 	Privileged  bool    `yaml:"privileged,omitempty"`   // container only
-	Source      *Source `yaml:"source,omitempty"`        // optional: where to fetch and build
+	Source      *Source `yaml:"source,omitempty"`       // optional: where to fetch and build
 }
 
 // Source describes where a service's source code lives and how to build it.

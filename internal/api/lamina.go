@@ -35,10 +35,10 @@ type laminaRequest struct {
 
 // laminaResponse is the JSON response from POST /v1/lamina.
 type laminaResponse struct {
-	ExitCode int              `json:"exit_code"`
-	Output   json.RawMessage  `json:"output,omitempty"`  // parsed JSON if --json output
-	Raw      string           `json:"raw,omitempty"`      // raw text if not valid JSON
-	Error    string           `json:"error,omitempty"`
+	ExitCode int             `json:"exit_code"`
+	Output   json.RawMessage `json:"output,omitempty"` // parsed JSON if --json output
+	Raw      string          `json:"raw,omitempty"`    // raw text if not valid JSON
+	Error    string          `json:"error,omitempty"`
 }
 
 const laminaExecTimeout = 5 * time.Minute

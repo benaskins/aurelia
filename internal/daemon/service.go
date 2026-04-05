@@ -372,7 +372,7 @@ func (ms *ManagedService) HealthHistory() []health.CheckRecord {
 type supervisionPhase int
 
 const (
-	phaseStarting    supervisionPhase = iota // Create driver and start the process
+	phaseStarting   supervisionPhase = iota // Create driver and start the process
 	phaseRunning                            // Wait for process exit or health failure
 	phaseEvaluating                         // Decide whether to restart based on exit code and policy
 	phaseRestarting                         // Wait for restart delay, then loop back to starting
