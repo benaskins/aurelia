@@ -14,7 +14,7 @@ import (
 // Node represents a remote aurelia daemon peer.
 type Node struct {
 	Name      string `yaml:"name"`
-	Addr      string `yaml:"addr"`                // e.g. "aurelia.local:9090"
+	Addr      string `yaml:"addr"`                 // e.g. "aurelia.local:9090"
 	Token     string `yaml:"token,omitempty"`      // inline token
 	TokenFile string `yaml:"token_file,omitempty"` // path to token file
 }
@@ -80,9 +80,9 @@ type OpenBaoPeer struct {
 
 // Diagnose configures the LLM-powered diagnostic engine.
 type Diagnose struct {
-	Provider     string `yaml:"provider"`        // LLM provider: "anthropic", "openai"
-	Model        string `yaml:"model"`           // model name, e.g. "claude-sonnet-4-20250514"
-	APIKeySecret string `yaml:"api_key_secret"`  // secret name for the API key (resolved via aurelia secret)
+	Provider     string `yaml:"provider"`           // LLM provider: "anthropic", "openai"
+	Model        string `yaml:"model"`              // model name, e.g. "claude-sonnet-4-20250514"
+	APIKeySecret string `yaml:"api_key_secret"`     // secret name for the API key (resolved via aurelia secret)
 	BaseURL      string `yaml:"base_url,omitempty"` // base URL for openai-compatible providers
 }
 
@@ -97,12 +97,12 @@ type ServiceCertConfig struct {
 
 // Config holds persistent daemon configuration loaded from ~/.aurelia/config.yaml.
 type Config struct {
-	RoutingOutput string    `yaml:"routing_output"`
-	APIAddr       string    `yaml:"api_addr"`
-	NodeName      string    `yaml:"node_name,omitempty"`
-	Nodes         []Node    `yaml:"nodes,omitempty"`
-	LaminaRoot    string    `yaml:"lamina_root,omitempty"`
-	SpecSource    string    `yaml:"spec_source,omitempty"` // source spec directory for drift detection
+	RoutingOutput string              `yaml:"routing_output"`
+	APIAddr       string              `yaml:"api_addr"`
+	NodeName      string              `yaml:"node_name,omitempty"`
+	Nodes         []Node              `yaml:"nodes,omitempty"`
+	LaminaRoot    string              `yaml:"lamina_root,omitempty"`
+	SpecSource    string              `yaml:"spec_source,omitempty"` // source spec directory for drift detection
 	TLS           *TLS                `yaml:"tls,omitempty"`
 	OpenBao       *OpenBao            `yaml:"openbao,omitempty"`
 	OpenBaoPeer   *OpenBaoPeer        `yaml:"openbao_peer,omitempty"`

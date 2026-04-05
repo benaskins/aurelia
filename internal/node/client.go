@@ -32,7 +32,7 @@ func peerTransport(tlsConfig *tls.Config) *http.Transport {
 	}
 	t := &http.Transport{
 		DialContext:         dialer.DialContext,
-		IdleConnTimeout:    15 * time.Second,
+		IdleConnTimeout:     15 * time.Second,
 		MaxIdleConnsPerHost: 1,
 		TLSHandshakeTimeout: 5 * time.Second,
 	}
@@ -217,10 +217,10 @@ func (c *Client) Inspect(name string) (json.RawMessage, error) {
 
 // LaminaResponse is the response from a remote lamina command execution.
 type LaminaResponse struct {
-	ExitCode int              `json:"exit_code"`
-	Output   json.RawMessage  `json:"output,omitempty"`
-	Raw      string           `json:"raw,omitempty"`
-	Error    string           `json:"error,omitempty"`
+	ExitCode int             `json:"exit_code"`
+	Output   json.RawMessage `json:"output,omitempty"`
+	Raw      string          `json:"raw,omitempty"`
+	Error    string          `json:"error,omitempty"`
 }
 
 // Lamina executes a lamina CLI command on the remote daemon.

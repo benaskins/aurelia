@@ -25,10 +25,10 @@ type ServiceCert struct {
 // ServiceCertRenewal manages automatic renewal of service TLS certificates
 // (server and client certs) via the CA peer node.
 type ServiceCertRenewal struct {
-	certs   []ServiceCert
-	adyton  *node.Client
-	mu      sync.Mutex
-	logger  *slog.Logger
+	certs  []ServiceCert
+	adyton *node.Client
+	mu     sync.Mutex
+	logger *slog.Logger
 
 	// postRenew is called after any cert is renewed (e.g. to restart traefik).
 	postRenew func()

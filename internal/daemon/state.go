@@ -22,10 +22,10 @@ type ServiceRecord struct {
 	PID         int    `json:"pid,omitempty"`
 	Type        string `json:"type"`
 	Port        int    `json:"port,omitempty"`
-	StartedAt   int64  `json:"started_at,omitempty"`    // Unix timestamp
-	Command     string `json:"command,omitempty"`        // process command for PID reuse detection
-	StartTime   int64  `json:"start_time,omitempty"`     // OS-reported process start time for PID reuse detection
-	ProcessName string `json:"process_name,omitempty"`   // OS-reported executable name (may differ from command after exec)
+	StartedAt   int64  `json:"started_at,omitempty"`   // Unix timestamp
+	Command     string `json:"command,omitempty"`      // process command for PID reuse detection
+	StartTime   int64  `json:"start_time,omitempty"`   // OS-reported process start time for PID reuse detection
+	ProcessName string `json:"process_name,omitempty"` // OS-reported executable name (may differ from command after exec)
 }
 
 // newServiceRecord creates a ServiceRecord with the common fields populated.

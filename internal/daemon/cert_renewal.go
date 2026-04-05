@@ -17,13 +17,13 @@ import (
 // For peer nodes, it calls the PKI renew endpoint on adyton.
 // For adyton itself, it issues directly via the PKI secrets engine.
 type CertRenewal struct {
-	certFile  string // path to node cert PEM
-	keyFile   string // path to node key PEM
-	caFile    string // path to CA chain PEM
-	nodeName  string // local node name (used as CN)
-	renewAt   time.Time
-	mu        sync.Mutex
-	logger    *slog.Logger
+	certFile string // path to node cert PEM
+	keyFile  string // path to node key PEM
+	caFile   string // path to CA chain PEM
+	nodeName string // local node name (used as CN)
+	renewAt  time.Time
+	mu       sync.Mutex
+	logger   *slog.Logger
 
 	// One of these is set depending on whether this is adyton or a peer.
 	pkiIssuer *keychain.BaoPKIIssuer // non-nil on adyton (self-renewal)

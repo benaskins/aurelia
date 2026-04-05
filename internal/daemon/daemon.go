@@ -31,24 +31,24 @@ const (
 
 // Daemon is the top-level process supervisor.
 type Daemon struct {
-	specDir      string
-	stateDir     string
-	specSource   string // optional: source spec directory for drift detection
-	secrets      keychain.Store
-	routing      *routing.TraefikGenerator
-	ports        *port.Allocator
-	services     map[string]*ManagedService
-	deps         *depGraph
-	state        *stateFile
-	mu           sync.RWMutex
-	logger       *slog.Logger
-	ctx          context.Context // daemon lifecycle context, set in Start()
-	adopted      []string        // services adopted during crash recovery, pending redeploy
-	redeployWait time.Duration   // delay before redeploying adopted services (default 10s)
-	peers        map[string]*node.Client // remote daemon peers
-	peerStatus   map[string]bool         // peer name -> reachable
-	certRenewal        *CertRenewal        // automatic node cert renewal (nil = disabled)
-	serviceCertRenewal *ServiceCertRenewal // automatic service cert renewal (nil = disabled)
+	specDir            string
+	stateDir           string
+	specSource         string // optional: source spec directory for drift detection
+	secrets            keychain.Store
+	routing            *routing.TraefikGenerator
+	ports              *port.Allocator
+	services           map[string]*ManagedService
+	deps               *depGraph
+	state              *stateFile
+	mu                 sync.RWMutex
+	logger             *slog.Logger
+	ctx                context.Context         // daemon lifecycle context, set in Start()
+	adopted            []string                // services adopted during crash recovery, pending redeploy
+	redeployWait       time.Duration           // delay before redeploying adopted services (default 10s)
+	peers              map[string]*node.Client // remote daemon peers
+	peerStatus         map[string]bool         // peer name -> reachable
+	certRenewal        *CertRenewal            // automatic node cert renewal (nil = disabled)
+	serviceCertRenewal *ServiceCertRenewal     // automatic service cert renewal (nil = disabled)
 }
 
 // NewDaemon creates a new daemon that manages services from the given spec directory.
