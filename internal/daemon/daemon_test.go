@@ -1226,6 +1226,7 @@ service:
 	if err := orphanCmd.Start(); err != nil {
 		t.Fatalf("starting orphan process: %v", err)
 	}
+	orphanPID := orphanCmd.Process.Pid
 	go orphanCmd.Wait()
 	t.Cleanup(func() { orphanCmd.Process.Kill() })
 
@@ -1266,13 +1267,19 @@ service:
 		t.Fatal("expected service to be in adopted list (found by command match)")
 	}
 
-	// The adopted PID should be the orphan, not the decoy
+	// The adopted PID should be the orphan, not the decoy. Check immediately
+	// after Start — before the 1ms redeploy goroutine is likely to have fired.
 	state, err := d.ServiceState("sleeper")
 	if err != nil {
 		t.Fatalf("ServiceState: %v", err)
 	}
 	if state.PID == decoyPID {
 		t.Error("should not have adopted the decoy PID")
+	}
+	if state.PID != orphanPID {
+		// Another sleep 300 process on the system may match first — log for
+		// diagnostics but don't hard-fail; the decoy check above is the real guard.
+		t.Logf("adopted PID %d, orphan was %d (may have matched a different sleep 300 or already redeployed)", state.PID, orphanPID)
 	}
 
 	// redeployWait is 1ms, so the redeploy goroutine may have already stopped
