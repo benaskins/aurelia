@@ -541,18 +541,47 @@ func (d *Daemon) RestartService(name string, timeout time.Duration) error {
 		cascadeTargets = g.cascadeStopTargets(name)
 	}
 
+	// Capture the OS-observed process name before stopping so we can match
+	// exec-replaced processes (whose running name differs from the spec command).
+	// Reading from the live driver while the process is still running is more
+	// reliable than reading from the state file after stop.
+	d.mu.RLock()
+	ms, ok := d.services[name]
+	d.mu.RUnlock()
+	var knownProcessName string
+	if ok {
+		ms.mu.Lock()
+		// drv is nil if the service has never started successfully.
+		if ms.drv != nil {
+			if pid := ms.drv.Info().PID; pid > 0 {
+				knownProcessName, _ = driver.ProcessName(pid)
+			}
+		}
+		ms.mu.Unlock()
+	}
+
 	if err := d.StopService(name, timeout); err != nil {
 		return err
 	}
 
 	// Reset restart counter so the service gets a fresh set of attempts
 	d.mu.RLock()
-	ms, ok := d.services[name]
+	ms, ok = d.services[name]
 	d.mu.RUnlock()
 	if ok {
 		ms.mu.Lock()
 		ms.restartCount = 0
 		ms.mu.Unlock()
+	}
+
+	// Proactively kill any orphaned OS process still holding the service port.
+	// The previously-supervised process may have survived SIGTERM (e.g. adopted
+	// process from crash recovery); if it is still on the port the new start will
+	// fail asynchronously with no recovery path.
+	// ms.spec is safe to read without holding d.mu — it is set once at
+	// construction and never reassigned.
+	if ok {
+		d.killOrphanOnPort(ms.spec, knownProcessName)
 	}
 
 	if err := d.StartService(d.ctx, name); err != nil {
@@ -581,6 +610,74 @@ func (d *Daemon) RestartService(name string, timeout time.Duration) error {
 	}
 
 	return nil
+}
+
+// killOrphanOnPort kills any OS process holding s's port before a restart.
+// Called from RestartService between StopService and StartService to prevent
+// "address already in use" when the previously-supervised process survived.
+// knownProcessName is the OS-reported name captured from the live driver before
+// stop; it is used as a second match tier to handle exec-replaced processes whose
+// running name differs from the spec command (mirrors recoverOrphanedPort).
+// Errors are logged but not returned — the caller proceeds regardless.
+func (d *Daemon) killOrphanOnPort(s *spec.ServiceSpec, knownProcessName string) {
+	port := 0
+	if s.Network != nil {
+		port = s.Network.Port
+	}
+	if port == 0 && s.NeedsDynamicPort() {
+		port = d.ports.Port(s.Service.Name)
+	}
+	if port <= 0 {
+		return
+	}
+
+	holderPID := driver.FindPIDOnPort(port)
+	if holderPID <= 0 {
+		return
+	}
+
+	name := s.Service.Name
+
+	// Guard: never kill the daemon's own process.
+	if holderPID == os.Getpid() {
+		d.logger.Error("port held by aurelia daemon itself, not killing",
+			"service", name, "port", port)
+		return
+	}
+
+	commandMatch := s.Service.Command != "" && driver.VerifyProcess(holderPID, s.Service.Command, 0)
+	nameMatch := knownProcessName != "" && driver.VerifyProcess(holderPID, knownProcessName, 0)
+	if (s.Service.Command != "" || knownProcessName != "") && !commandMatch && !nameMatch {
+		holderName, _ := driver.ProcessName(holderPID)
+		d.logger.Warn("port held by unrelated process during restart, skipping kill",
+			"service", name, "port", port, "holder_pid", holderPID, "holder_name", holderName)
+		return
+	}
+
+	// Kill to free the port for the incoming restart. Unlike recoverOrphanedPort
+	// (which adopts a matching orphan when found during startup), here we have an
+	// explicit restart in progress — adopting the old process would silently
+	// preserve the old instance instead of starting the fresh one the caller
+	// requested.
+	holderName, _ := driver.ProcessName(holderPID)
+	d.logger.Warn("orphaned process holding port before restart, killing",
+		"service", name, "port", port, "orphan_pid", holderPID, "holder_name", holderName)
+
+	orphan, err := driver.NewAdopted(holderPID)
+	if err != nil {
+		// Process disappeared between FindPIDOnPort and now — port is free.
+		d.logger.Info("orphan disappeared before kill", "service", name, "orphan_pid", holderPID)
+		return
+	}
+
+	killCtx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
+	defer cancel()
+	if err := orphan.Stop(killCtx, 10*time.Second); err != nil {
+		d.logger.Error("failed to kill orphan during restart",
+			"service", name, "orphan_pid", holderPID, "error", err)
+	} else {
+		d.logger.Info("killed orphan before restart", "service", name, "killed_pid", holderPID)
+	}
 }
 
 // ServiceStates returns the state of all managed services.

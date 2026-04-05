@@ -92,6 +92,10 @@ func (d *AdoptedDriver) Start(ctx context.Context) error {
 
 func (d *AdoptedDriver) Stop(ctx context.Context, timeout time.Duration) error {
 	d.mu.Lock()
+	// If state is not StateRunning, the process is already gone: either Stop()
+	// was already called, or the monitor goroutine detected exit via kill(pid,0)
+	// and set StateFailed.  In both cases there is nothing to signal — the
+	// underlying PID is dead.
 	if d.state != StateRunning {
 		d.mu.Unlock()
 		return nil
