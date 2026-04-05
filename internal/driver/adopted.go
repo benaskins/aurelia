@@ -20,8 +20,8 @@ type AdoptedDriver struct {
 	exitCode  int
 	exitErr   string
 	done      chan struct{}
-	stopCh    chan struct{}    // signals monitor to stop polling
-	monitorWg sync.WaitGroup  // tracks monitor goroutine lifetime
+	stopCh    chan struct{}  // signals monitor to stop polling
+	monitorWg sync.WaitGroup // tracks monitor goroutine lifetime
 }
 
 // NewAdopted creates a driver that monitors an already-running process.
