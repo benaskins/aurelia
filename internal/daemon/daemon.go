@@ -173,14 +173,27 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 		// Try to adopt a previously-running process
 		if rec, ok := prevState[name]; ok && rec.Type == "native" && rec.PID > 0 {
-			// Verify the PID still belongs to the expected process (guard against PID reuse)
-			if !driver.VerifyProcess(rec.PID, rec.Command, rec.StartTime) {
+			// Verify the PID still belongs to the expected process (guard against PID reuse).
+			// Try the spec command first, then the observed process name (handles
+			// exec-replaced scripts where the binary name differs from the command).
+			verified := driver.VerifyProcess(rec.PID, rec.Command, rec.StartTime)
+			if !verified && rec.ProcessName != "" {
+				verified = driver.VerifyProcess(rec.PID, rec.ProcessName, rec.StartTime)
+			}
+			if !verified {
+				// AURELIA_SERVICE env tag survives exec and reparenting — definitive proof.
+				if tag := driver.AureliaServiceTag(rec.PID); tag == name {
+					verified = true
+				}
+			}
+			if !verified {
 				d.logger.Warn("PID reuse detected, searching for orphaned process",
 					"service", name, "pid", rec.PID,
-					"expected_command", rec.Command)
+					"expected_command", rec.Command, "process_name", rec.ProcessName)
 
-				// Search for the actual orphaned process by command pattern
-				if orphanPID := driver.FindProcessByCommand(rec.Command, rec.PID); orphanPID > 0 {
+				// Search for the actual orphaned process by command pattern and
+				// observed process name (handles exec-replaced scripts).
+				if orphanPID := driver.FindProcessByCommand(rec.Command, rec.PID, rec.ProcessName); orphanPID > 0 {
 					d.logger.Info("found orphaned process by command match",
 						"service", name, "orphan_pid", orphanPID, "command", rec.Command)
 					adopted, err := driver.NewAdopted(orphanPID)
@@ -196,6 +209,28 @@ func (d *Daemon) Start(ctx context.Context) error {
 							"service", name, "orphan_pid", orphanPID)
 					}
 				} else {
+					// Command-based search failed — try port-based detection.
+					// This catches exec-replaced processes where the stored
+					// process name doesn't match the running binary.
+					adopted := false
+					if rec.Port > 0 {
+						if portPID := driver.FindPIDOnPort(rec.Port); portPID > 0 && portPID != rec.PID {
+							d.logger.Info("found orphaned process by port match",
+								"service", name, "orphan_pid", portPID, "port", rec.Port)
+							drv, err := driver.NewAdopted(portPID)
+							if err == nil {
+								if err := d.adoptService(ctx, s, drv); err != nil {
+									d.logger.Error("failed to adopt port-matched process", "service", name, "error", err)
+								} else {
+									d.adopted = append(d.adopted, name)
+									adopted = true
+								}
+							}
+						}
+					}
+					if adopted {
+						continue
+					}
 					d.logger.Info("no orphaned process found, will start fresh",
 						"service", name, "stale_pid", rec.PID)
 				}
@@ -217,7 +252,11 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 		if err := d.startService(ctx, s); err != nil {
 			// Check if the failure is due to an orphaned process holding a port
-			if d.recoverOrphanedPort(ctx, s, err) {
+			var knownProcessName string
+			if rec, ok := prevState[name]; ok {
+				knownProcessName = rec.ProcessName
+			}
+			if d.recoverOrphanedPort(ctx, s, knownProcessName, err) {
 				continue
 			}
 			d.logger.Error("failed to start service", "service", name, "error", err)
@@ -491,7 +530,17 @@ func (d *Daemon) RemoveService(name string, timeout time.Duration) error {
 // RestartService stops and restarts a service.
 // It uses the daemon's lifecycle context (not the caller's) so the new
 // service outlives short-lived request contexts.
+// After the target restarts, any cascade-stopped dependents are also restarted.
 func (d *Daemon) RestartService(name string, timeout time.Duration) error {
+	// Collect cascade targets before stopping — these will need restarting.
+	var cascadeTargets []string
+	d.mu.RLock()
+	g := d.deps
+	d.mu.RUnlock()
+	if g != nil {
+		cascadeTargets = g.cascadeStopTargets(name)
+	}
+
 	if err := d.StopService(name, timeout); err != nil {
 		return err
 	}
@@ -506,7 +555,32 @@ func (d *Daemon) RestartService(name string, timeout time.Duration) error {
 		ms.mu.Unlock()
 	}
 
-	return d.StartService(d.ctx, name)
+	if err := d.StartService(d.ctx, name); err != nil {
+		return err
+	}
+
+	// Restart cascade-stopped dependents
+	for _, dep := range cascadeTargets {
+		d.mu.RLock()
+		depMs, exists := d.services[dep]
+		d.mu.RUnlock()
+		if !exists {
+			continue
+		}
+		// Only restart if the service was actually stopped by the cascade
+		state := depMs.State()
+		if state.State == "stopped" || state.State == "failed" {
+			d.logger.Info("cascade restarting dependent", "service", dep, "because", name)
+			depMs.mu.Lock()
+			depMs.restartCount = 0
+			depMs.mu.Unlock()
+			if err := d.StartService(d.ctx, dep); err != nil {
+				d.logger.Error("error cascade restarting", "service", dep, "error", err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // ServiceStates returns the state of all managed services.
@@ -764,6 +838,7 @@ func (d *Daemon) startServiceLocked(ctx context.Context, s *spec.ServiceSpec) er
 			if st, err := driver.ProcessStartTime(pid); err == nil {
 				rec.StartTime = st
 			}
+			rec.ProcessName = resolveProcessName(pid)
 			if err := d.state.set(name, rec); err != nil {
 				d.logger.Warn("failed to save service state", "service", name, "error", err)
 			}
@@ -863,6 +938,7 @@ func (d *Daemon) adoptService(ctx context.Context, s *spec.ServiceSpec, drv driv
 		if st, err := driver.ProcessStartTime(pid); err == nil {
 			rec.StartTime = st
 		}
+		rec.ProcessName = resolveProcessName(pid)
 		if err := d.state.set(name, rec); err != nil {
 			d.logger.Warn("failed to save service state", "service", name, "error", err)
 		}
@@ -920,8 +996,9 @@ func (d *Daemon) redeployAdopted() {
 
 // recoverOrphanedPort checks if a service start failure is due to an orphaned
 // process holding the service's port. If so, it kills the orphan and retries
-// the start. Returns true if recovery succeeded and the service is now running.
-func (d *Daemon) recoverOrphanedPort(ctx context.Context, s *spec.ServiceSpec, startErr error) bool {
+// the start. The knownProcessName is the OS-reported process name from a previous
+// run (may be empty). Returns true if recovery succeeded and the service is now running.
+func (d *Daemon) recoverOrphanedPort(ctx context.Context, s *spec.ServiceSpec, knownProcessName string, startErr error) bool {
 	if startErr == nil {
 		return false
 	}
@@ -945,40 +1022,97 @@ func (d *Daemon) recoverOrphanedPort(ctx context.Context, s *spec.ServiceSpec, s
 		return false
 	}
 
-	// Verify the port holder matches the expected service command
+	// Check if the port holder looks like our orphaned service. Try the spec
+	// command first, then the observed process name from the previous run.
 	name := s.Service.Name
-	if s.Service.Command != "" && !driver.VerifyProcess(holderPID, s.Service.Command, 0) {
-		d.logger.Warn("port held by unrelated process, not killing",
-			"service", name, "port", port, "holder_pid", holderPID)
-		return false
+	commandMatch := s.Service.Command != "" && driver.VerifyProcess(holderPID, s.Service.Command, 0)
+	nameMatch := knownProcessName != "" && driver.VerifyProcess(holderPID, knownProcessName, 0)
+
+	if commandMatch || nameMatch {
+		// The port holder matches — adopt it rather than killing and restarting.
+		adopted, err := driver.NewAdopted(holderPID)
+		if err != nil {
+			d.logger.Warn("orphaned process disappeared before adoption",
+				"service", name, "orphan_pid", holderPID)
+		} else {
+			d.logger.Info("adopting orphaned process holding port",
+				"service", name, "port", port, "orphan_pid", holderPID)
+			if err := d.adoptService(ctx, s, adopted); err != nil {
+				d.logger.Error("failed to adopt orphaned process", "service", name, "error", err)
+			} else {
+				d.adopted = append(d.adopted, name)
+				return true
+			}
+		}
 	}
 
-	d.logger.Warn("killing orphaned process holding port",
-		"service", name, "port", port, "orphan_pid", holderPID)
+	// If the port holder is on our configured port but we can't verify by name,
+	// it's still likely our orphan (exec-replaced scripts produce name mismatches).
+	// Kill it and retry rather than leaving the service permanently broken.
+	// Guard: never kill our own process.
+	holderName, _ := driver.ProcessName(holderPID)
+	if holderPID == os.Getpid() {
+		d.logger.Error("port held by aurelia daemon itself, not killing",
+			"service", name, "port", port)
+		return false
+	}
+	d.logger.Warn("killing unverified process holding port",
+		"service", name, "port", port, "holder_pid", holderPID, "holder_name", holderName)
 
-	// Kill the orphan via an adopted driver for clean shutdown
 	orphan, err := driver.NewAdopted(holderPID)
 	if err != nil {
-		d.logger.Error("orphaned process disappeared before kill",
-			"service", name, "orphan_pid", holderPID)
+		d.logger.Error("process disappeared before kill",
+			"service", name, "holder_pid", holderPID)
 		return false
 	}
 
 	if err := orphan.Stop(ctx, 10*time.Second); err != nil {
-		d.logger.Error("failed to kill orphaned process",
-			"service", name, "orphan_pid", holderPID, "error", err)
+		d.logger.Error("failed to kill process holding port",
+			"service", name, "holder_pid", holderPID, "error", err)
 		return false
 	}
 
-	d.logger.Info("killed orphaned process, retrying service start",
+	d.logger.Info("killed process holding port, retrying service start",
 		"service", name, "killed_pid", holderPID, "port", port)
 
 	// Retry the start
 	if err := d.startService(ctx, s); err != nil {
-		d.logger.Error("failed to start service after killing orphan",
+		d.logger.Error("failed to start service after clearing port",
 			"service", name, "error", err)
 		return false
 	}
 
 	return true
+}
+
+// resolveProcessName polls briefly to capture the post-exec process name.
+// Shell scripts that use exec to replace themselves will initially report the
+// shell name; after a few milliseconds the kernel reports the replacement binary.
+// Returns the final observed name, or the initial name if it doesn't change.
+func resolveProcessName(pid int) string {
+	initial, err := driver.ProcessName(pid)
+	if err != nil {
+		return ""
+	}
+
+	// If it's not a shell, exec replacement is unlikely — return immediately.
+	switch initial {
+	case "bash", "sh", "zsh", "dash", "fish":
+	default:
+		return initial
+	}
+
+	// Poll briefly for the exec to complete.
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+		name, err := driver.ProcessName(pid)
+		if err != nil {
+			return initial
+		}
+		if name != initial {
+			return name
+		}
+	}
+	return initial
 }

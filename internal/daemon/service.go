@@ -711,6 +711,10 @@ func (ms *ManagedService) buildEnvWithPort(port int) []string {
 		env = os.Environ()
 	}
 
+	// Tag the process so orphan detection can identify it as aurelia-managed.
+	// This survives exec replacement and reparenting to PID 1.
+	env = append(env, "AURELIA_SERVICE="+ms.spec.Service.Name)
+
 	if port != 0 {
 		env = append(env, fmt.Sprintf("PORT=%d", port))
 	}

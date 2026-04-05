@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benaskins/aurelia/internal/driver"
 	"github.com/benaskins/aurelia/internal/spec"
 )
 
@@ -1360,19 +1361,35 @@ network:
 }
 
 func TestRecoverOrphanedPortDirect(t *testing.T) {
-	// Direct test of recoverOrphanedPort: start a listener on a port,
-	// then call recoverOrphanedPort with a matching service spec and error.
+	// Direct test of recoverOrphanedPort: start a child process holding a port,
+	// verify that recoverOrphanedPort kills it and retries the start.
 	dir := t.TempDir()
 	stateDir := t.TempDir()
 
-	// Start a sleep process that holds a port via a listener
+	// Start a child process that listens on a port (simulates an orphan).
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	// Keep the listener open — our own process holds the port.
-	defer ln.Close()
+	ln.Close() // Free it so the child can bind
+
+	// Use bash to hold the port via a simple listener
+	cmd := exec.Command("bash", "-c",
+		fmt.Sprintf("exec python3 -c \"import socket,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(('127.0.0.1',%d)); s.listen(1); time.sleep(300)\"", port))
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start holder: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	// Wait for it to bind the port
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if pid := driver.FindPIDOnPort(port); pid > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	writeSpec(t, dir, "svc.yaml", fmt.Sprintf(`
 service:
@@ -1397,13 +1414,20 @@ network:
 
 	s := specs[0]
 
-	// recoverOrphanedPort should find the port holder but refuse to kill it
-	// because the port holder (our test process) doesn't match the expected
-	// command "sleep 300" (we're a Go test binary, not sleep).
+	// recoverOrphanedPort should kill the port holder (it's on our
+	// configured port) and attempt to start the service.
 	fakeErr := fmt.Errorf("address already in use")
-	recovered := d.recoverOrphanedPort(ctx, s, fakeErr)
+	recovered := d.recoverOrphanedPort(ctx, s, "", fakeErr)
+	// The start will fail (sleep doesn't listen on a port) but the kill
+	// should succeed — the key assertion is that we don't refuse to act.
 	if recovered {
-		t.Error("should not have recovered — port holder is unrelated process")
+		// If it somehow succeeded (sleep bound the port), that's fine too
+		return
+	}
+
+	// Verify the holder was killed
+	if pid := driver.FindPIDOnPort(port); pid > 0 {
+		t.Error("port holder should have been killed but is still running")
 	}
 }
 

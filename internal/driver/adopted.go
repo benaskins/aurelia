@@ -203,7 +203,35 @@ func VerifyProcess(pid int, expectedCommand string, expectedStartTime int64) boo
 		return true
 	}
 
-	return actual == filepath.Base(parts[0])
+	expected := filepath.Base(parts[0])
+	return namesMatch(actual, expected)
+}
+
+// namesMatch compares two process names, handling platform quirks:
+// - Case-insensitive comparison (macOS P_comm capitalisation varies)
+// - Version-stripped comparison (python3.12 matches Python)
+func namesMatch(actual, expected string) bool {
+	if strings.EqualFold(actual, expected) {
+		return true
+	}
+
+	// Strip version suffixes for comparison: python3.12 → python, ruby3.2 → ruby
+	return strings.EqualFold(stripVersion(actual), stripVersion(expected))
+}
+
+// stripVersion removes trailing version numbers from a binary name.
+// e.g. "python3.12" → "python", "ruby3.2" → "ruby", "node18" → "node"
+// Returns the original name if stripping would produce an empty string.
+func stripVersion(name string) string {
+	for i, c := range name {
+		if c >= '0' && c <= '9' {
+			if i == 0 {
+				return name // don't strip if name starts with a digit (e.g. "7zip")
+			}
+			return name[:i]
+		}
+	}
+	return name
 }
 
 // ProcessStartTime returns the OS-reported start time for a process. The value
@@ -212,4 +240,11 @@ func VerifyProcess(pid int, expectedCommand string, expectedStartTime int64) boo
 // with the PID.
 func ProcessStartTime(pid int) (int64, error) {
 	return processStartTime(pid)
+}
+
+// ProcessName returns the OS-reported executable name for a running process.
+// This may differ from the command used to start the process (e.g. when a shell
+// script uses exec to replace itself with a different binary).
+func ProcessName(pid int) (string, error) {
+	return processName(pid)
 }

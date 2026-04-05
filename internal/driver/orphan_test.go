@@ -71,6 +71,30 @@ func TestFindProcessByCommandFindsAbsolutePath(t *testing.T) {
 	}
 }
 
+func TestFindProcessByCommandAlsoMatch(t *testing.T) {
+	// Start a sleep process and search with a wrong command but correct alsoMatch name.
+	// This simulates a shell script that exec-replaces itself with a different binary.
+	cmd := exec.Command("sleep", "300")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting sleep: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	// Primary command doesn't match, but alsoMatch does
+	pid := FindProcessByCommand("my-start-script.sh", 0, "sleep")
+	if pid == 0 {
+		t.Fatal("expected to find sleep process via alsoMatch")
+	}
+}
+
+func TestFindProcessByCommandAlsoMatchEmpty(t *testing.T) {
+	// Both command and alsoMatch empty should return 0
+	pid := FindProcessByCommand("", 0, "")
+	if pid != 0 {
+		t.Errorf("expected 0 for empty command and empty alsoMatch, got %d", pid)
+	}
+}
+
 func TestFindPIDOnPortFindsListener(t *testing.T) {
 	// Start a TCP listener on a random port
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

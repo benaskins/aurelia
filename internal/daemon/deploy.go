@@ -155,6 +155,7 @@ func (d *Daemon) deployPromote(name string, ms *ManagedService, tempPort int, ne
 	// Set up the onStarted callback for state persistence
 	newMs.onStarted = func(pid int) {
 		rec := newServiceRecord(ms.spec.Service.Type, pid, tempPort, ms.spec.Service.Command)
+		rec.ProcessName = resolveProcessName(pid)
 		if err := d.state.set(name, rec); err != nil {
 			d.logger.Warn("failed to save service state", "service", name, "error", err)
 		}
@@ -181,6 +182,7 @@ func (d *Daemon) deployPromote(name string, ms *ManagedService, tempPort int, ne
 
 	// Update state file
 	rec := newServiceRecord(ms.spec.Service.Type, newDrv.Info().PID, tempPort, ms.spec.Service.Command)
+	rec.ProcessName = resolveProcessName(newDrv.Info().PID)
 	if err := d.state.set(name, rec); err != nil {
 		d.logger.Warn("failed to save service state after deploy", "service", name, "error", err)
 	}
