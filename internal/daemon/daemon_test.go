@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -1483,5 +1484,226 @@ service:
 	}
 	if state.PID == os.Getpid() {
 		t.Error("should not have adopted the stale PID")
+	}
+}
+
+func TestKillOrphanOnPortFree(t *testing.T) {
+	// When nothing holds the port, killOrphanOnPort should be a no-op.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	dir := t.TempDir()
+	writeSpec(t, dir, "svc.yaml", fmt.Sprintf(`
+service:
+  name: svc
+  type: native
+  command: "sleep 300"
+
+network:
+  port: %d
+`, port))
+
+	specs, err := spec.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.ctx = ctx
+
+	// Should not panic or error — port is already free.
+	d.killOrphanOnPort(specs[0], "")
+}
+
+func TestKillOrphanOnPortUnrelatedProcess(t *testing.T) {
+	// When the port is held by an external process whose name does NOT match the
+	// spec command or the known process name, killOrphanOnPort must refuse to kill it.
+	if _, err := exec.LookPath("nc"); err != nil {
+		t.Skip("nc not in PATH")
+	}
+
+	// Grab a free port then release it for nc to bind.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	// Start nc as the port holder — its binary name is "nc", not "sleep".
+	cmd := exec.Command("nc", "-l", "127.0.0.1", strconv.Itoa(port))
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting nc: %v", err)
+	}
+	go cmd.Wait()
+	t.Cleanup(func() { cmd.Process.Kill() })
+
+	// Wait until nc is actually listening.
+	deadline := time.Now().Add(3 * time.Second)
+	for driver.FindPIDOnPort(port) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("nc did not start listening in time")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// The spec command and known process name both say "sleep" — neither matches nc.
+	dir := t.TempDir()
+	writeSpec(t, dir, "svc.yaml", fmt.Sprintf(`
+service:
+  name: svc
+  type: native
+  command: "sleep 300"
+
+network:
+  port: %d
+`, port))
+
+	specs, err := spec.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.ctx = ctx
+
+	d.killOrphanOnPort(specs[0], "sleep")
+
+	// nc must still be alive and holding the port.
+	if driver.FindPIDOnPort(port) == 0 {
+		t.Error("expected port to still be held by the unrelated nc process")
+	}
+}
+
+func TestKillOrphanOnPortKnownNameMatch(t *testing.T) {
+	// When the spec command does NOT match the port holder but the knownProcessName
+	// does (exec-replaced process scenario), killOrphanOnPort should still kill it.
+	if _, err := exec.LookPath("nc"); err != nil {
+		t.Skip("nc not in PATH")
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	cmd := exec.Command("nc", "-l", "127.0.0.1", strconv.Itoa(port))
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting nc: %v", err)
+	}
+	go cmd.Wait()
+	t.Cleanup(func() { cmd.Process.Kill() })
+
+	deadline := time.Now().Add(3 * time.Second)
+	for driver.FindPIDOnPort(port) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("nc did not start listening in time")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Spec command is "myservice" (doesn't match nc), but the known process name
+	// is "nc" (the OS-observed name from a previous exec-replaced start).
+	dir := t.TempDir()
+	writeSpec(t, dir, "svc.yaml", fmt.Sprintf(`
+service:
+  name: svc
+  type: native
+  command: "myservice"
+
+network:
+  port: %d
+`, port))
+
+	specs, err := spec.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.ctx = ctx
+
+	d.killOrphanOnPort(specs[0], "nc")
+
+	if pid := driver.FindPIDOnPort(port); pid != 0 {
+		t.Errorf("expected port %d to be free after killing exec-replaced orphan, still held by PID %d", port, pid)
+	}
+}
+
+func TestKillOrphanOnPortMatchingProcess(t *testing.T) {
+	// When an orphaned process holds the port and its command matches the spec,
+	// killOrphanOnPort should kill it and release the port.
+	if _, err := exec.LookPath("nc"); err != nil {
+		t.Skip("nc not in PATH")
+	}
+
+	// Grab a free port, then release it so nc can bind.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	// Start nc listening on the port to simulate an orphaned process.
+	// BSD nc (macOS) syntax: nc -l <host> <port>. GNU nc (Linux) uses
+	// different flags; this test is skipped if nc is not in PATH.
+	cmd := exec.Command("nc", "-l", "127.0.0.1", strconv.Itoa(port))
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting nc: %v", err)
+	}
+	// Reap the child so it doesn't become a zombie — we check port release, not PID death.
+	go cmd.Wait()
+	t.Cleanup(func() { cmd.Process.Kill() })
+
+	// Wait until nc is actually listening (up to 3 seconds).
+	deadline := time.Now().Add(3 * time.Second)
+	for driver.FindPIDOnPort(port) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("nc did not start listening in time")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	dir := t.TempDir()
+	writeSpec(t, dir, "svc.yaml", fmt.Sprintf(`
+service:
+  name: svc
+  type: native
+  command: "nc -l 127.0.0.1 %d"
+
+network:
+  port: %d
+`, port, port))
+
+	specs, err := spec.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	d := NewDaemon(dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.ctx = ctx
+
+	d.killOrphanOnPort(specs[0], "nc")
+
+	// After killOrphanOnPort returns the orphan has been signalled (SIGTERM or
+	// SIGKILL). The process releases its socket on exit, so the port should be
+	// free — even if the PID lingers briefly as a zombie.
+	if pid := driver.FindPIDOnPort(port); pid != 0 {
+		t.Errorf("expected port %d to be free after killOrphanOnPort, still held by PID %d", port, pid)
 	}
 }
