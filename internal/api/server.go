@@ -34,24 +34,25 @@ var uiFS embed.FS
 
 // Server serves the aurelia REST API over a Unix socket.
 type Server struct {
-	daemon      *daemon.Daemon
-	gpu         *gpu.Observer
-	listener    net.Listener
-	server      *http.Server
-	tcpServer   *http.Server // separate server for TCP with auth middleware
-	logger      *slog.Logger
-	token       string // bearer token for TCP auth (empty = no auth)
-	prevToken   string // previous token during rotation (valid until rotation completes)
-	tokenPath   string // path to token file on disk
-	tokenMu     sync.RWMutex
-	nodeName    string // local node name for stamping on service states
-	laminaRoot  string // workspace root for lamina CLI execution
-	configPath  string // path to config file for token updates
-	rateLimiter *rateLimitMiddleware
-	tokenVendor *keychain.BaoTokenVendor
-	knownNodes  map[string]bool // valid peer CNs for token vending
-	pkiIssuer   *keychain.BaoPKIIssuer
-	secretCache *keychain.CachedStore
+	daemon         *daemon.Daemon
+	gpu            *gpu.Observer
+	listener       net.Listener
+	server         *http.Server
+	tcpServer      *http.Server // separate server for TCP with auth middleware
+	logger         *slog.Logger
+	token          string // bearer token for TCP auth (empty = no auth)
+	prevToken      string // previous token during rotation (valid until rotation completes)
+	tokenPath      string // path to token file on disk
+	tokenMu        sync.RWMutex
+	nodeName       string // local node name for stamping on service states
+	laminaRoot     string // workspace root for lamina CLI execution
+	configPath     string // path to config file for token updates
+	rateLimiter    *rateLimitMiddleware
+	tokenVendor    *keychain.BaoTokenVendor
+	knownNodes     map[string]bool // valid peer CNs for token vending
+	pkiIssuer      *keychain.BaoPKIIssuer
+	secretCache    *keychain.CachedStore
+	shutdownCancel context.CancelFunc // cancels all request contexts on Shutdown
 }
 
 // NewServer creates an API server backed by the given daemon.
@@ -125,13 +126,19 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 		http.NotFound(w, r)
 	})
 
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	s.shutdownCancel = shutdownCancel
+
 	s.server = &http.Server{
 		Handler:           mux,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      5 * time.Minute, // deploy endpoint blocks for health checks + drain
+		WriteTimeout:      0,             // disabled: streaming endpoints (logs --follow) require no write deadline
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20, // 1MB
+		BaseContext: func(net.Listener) context.Context {
+			return shutdownCtx
+		},
 	}
 	return s
 }
@@ -261,6 +268,7 @@ func (s *Server) ListenTCP(addr string) error {
 		ReadHeaderTimeout: s.server.ReadHeaderTimeout,
 		IdleTimeout:       s.server.IdleTimeout,
 		MaxHeaderBytes:    s.server.MaxHeaderBytes,
+		BaseContext:       s.server.BaseContext,
 	}
 	return s.tcpServer.Serve(ln)
 }
@@ -362,6 +370,7 @@ func (s *Server) ListenTLS(addr string, tlsConfig *tls.Config) error {
 		ReadHeaderTimeout: s.server.ReadHeaderTimeout,
 		IdleTimeout:       s.server.IdleTimeout,
 		MaxHeaderBytes:    s.server.MaxHeaderBytes,
+		BaseContext:       s.server.BaseContext,
 	}
 	return s.tcpServer.Serve(ln)
 }
@@ -464,7 +473,10 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 }
 
 // Shutdown gracefully shuts down both the Unix and TCP API servers.
+// It cancels all active request contexts first, allowing streaming handlers
+// (such as logs --follow) to exit promptly.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.shutdownCancel() // cancel all active request contexts
 	err := s.server.Shutdown(ctx)
 	if s.tcpServer != nil {
 		if tcpErr := s.tcpServer.Shutdown(ctx); tcpErr != nil && err == nil {
@@ -635,6 +647,12 @@ func (s *Server) shipService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serviceLogs(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+
+	if r.URL.Query().Get("follow") == "true" {
+		s.serviceLogsFollow(w, r, name)
+		return
+	}
+
 	const maxLogLines = 10000
 	n := 100
 	if qn := r.URL.Query().Get("n"); qn != "" {
@@ -648,6 +666,68 @@ func (s *Server) serviceLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"lines": lines})
+}
+
+func (s *Server) serviceLogsFollow(w http.ResponseWriter, r *http.Request, name string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming not supported"})
+		return
+	}
+
+	// Verify service exists before opening stream
+	if _, _, err := s.daemon.ServiceLogsSince(name, 0); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": errorMessage("service not found", err, r)})
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush() // send headers to client immediately
+
+	// emit writes lines to the response, flushing if any were written.
+	// Returns false if the client disconnected.
+	emit := func(lines []string) bool {
+		for _, line := range lines {
+			if _, werr := fmt.Fprintln(w, line); werr != nil {
+				return false
+			}
+		}
+		if len(lines) > 0 {
+			flusher.Flush()
+		}
+		return true
+	}
+
+	// Send initial snapshot immediately, then poll for new lines.
+	lines, gen, err := s.daemon.ServiceLogsSince(name, 0)
+	if err != nil {
+		return
+	}
+	if !emit(lines) {
+		return
+	}
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+		}
+
+		lines, newGen, err := s.daemon.ServiceLogsSince(name, gen)
+		if err != nil {
+			// Service removed while following — close stream
+			return
+		}
+		if !emit(lines) {
+			return
+		}
+		gen = newGen
+	}
 }
 func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
 	result, err := s.daemon.Reload(r.Context())

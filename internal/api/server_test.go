@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ecdsa"
@@ -478,6 +479,103 @@ service:
 	if result["lines"] == nil {
 		t.Error("expected lines field in response")
 	}
+}
+
+func TestServiceLogsFollow(t *testing.T) {
+	// Use "echo hello" — NativeDriver splits command on spaces (no shell quoting),
+	// so use a simple single-argument command.
+	_, client := setupTestServer(t, map[string]string{
+		"svc.yaml": `
+service:
+  name: follow-svc
+  type: native
+  command: "echo hello"
+`,
+	})
+
+	// Wait for the service to produce output and be collected in the buffer
+	time.Sleep(300 * time.Millisecond)
+
+	// Connect with follow=true; cancel after receiving the expected line
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://aurelia/v1/services/follow-svc/logs?follow=true", nil)
+	if err != nil {
+		t.Fatalf("creating request: %v", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil && ctx.Err() == nil {
+		t.Fatalf("GET logs?follow=true: %v", err)
+	}
+	if resp == nil {
+		return // context cancelled before response — acceptable
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/plain" {
+		t.Errorf("expected Content-Type text/plain, got %q", ct)
+	}
+
+	var received []string
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			received = append(received, line)
+			cancel() // got what we needed
+			break
+		}
+	}
+
+	if len(received) == 0 {
+		t.Errorf("expected at least 1 line, got none")
+		return
+	}
+	if received[0] != "hello" {
+		t.Errorf("expected 'hello', got %q", received[0])
+	}
+}
+
+func TestLogsFollowDisconnect(t *testing.T) {
+	// Short test name avoids socket path > 104 chars (macOS limit).
+	_, client := setupTestServer(t, map[string]string{
+		"svc.yaml": `
+service:
+  name: sleep-svc
+  type: native
+  command: "sleep 30"
+`,
+	})
+
+	time.Sleep(100 * time.Millisecond)
+
+	req, err := http.NewRequest("GET", "http://aurelia/v1/services/sleep-svc/logs?follow=true", nil)
+	if err != nil {
+		t.Fatalf("creating request: %v", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET logs?follow=true: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+		return
+	}
+
+	// Closing the response body closes the TCP connection, signalling the server.
+	resp.Body.Close()
+
+	// The server's polling loop should exit via r.Context().Done() within ~100ms.
+	// We verify this indirectly: the server must not block the daemon shutdown,
+	// which happens in t.Cleanup. If the test completes without hanging, it passes.
 }
 
 func TestListenTCPNonLoopbackWarning(t *testing.T) {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -29,6 +30,23 @@ func apiClient() (*http.Client, error) {
 	}
 	return &http.Client{
 		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", socketPath)
+			},
+		},
+	}, nil
+}
+
+// apiStreamClient returns an HTTP client suitable for streaming responses.
+// Unlike apiClient, it has no request timeout — the caller controls lifetime
+// via context cancellation.
+func apiStreamClient() (*http.Client, error) {
+	socketPath, err := defaultSocketPath()
+	if err != nil {
+		return nil, err
+	}
+	return &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				return net.Dial("unix", socketPath)
@@ -655,11 +673,19 @@ var logsCmd = &cobra.Command{
 	Short: "Show recent log output for a service",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		follow, _ := cmd.Flags().GetBool("follow")
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		n, _ := cmd.Flags().GetInt("lines")
 		remote, err := resolveNodeClient(cmd)
 		if err != nil {
 			return err
+		}
+
+		if follow {
+			if remote != nil {
+				return fmt.Errorf("--follow is not supported with --node")
+			}
+			return logsFollow(args[0])
 		}
 
 		var lines []string
@@ -686,6 +712,40 @@ var logsCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// logsFollow streams live log output for a service until EOF or interrupt.
+func logsFollow(service string) error {
+	client, err := apiStreamClient()
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		fmt.Sprintf("http://aurelia/v1/services/%s/logs?follow=true", service), nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("connecting to daemon: %w (is aurelia daemon running?)", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return fmt.Errorf("API error %d: %s", resp.StatusCode, body)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		fmt.Println(scanner.Text())
+	}
+	return scanner.Err()
 }
 
 // checkSpecDrift loads the daemon config, resolves the source spec directory,
@@ -727,6 +787,7 @@ func checkSpecDrift() {
 
 func init() {
 	logsCmd.Flags().IntP("lines", "n", 50, "number of lines to show")
+	logsCmd.Flags().BoolP("follow", "f", false, "stream live log output")
 	deployCmd.Flags().String("drain", "5s", "drain period before stopping old instance")
 
 	rootCmd.AddCommand(statusCmd)
