@@ -44,4 +44,8 @@ type Driver interface {
 
 	// LogLines returns the last n lines from the log buffer.
 	LogLines(n int) []string
+
+	// LogLinesSince returns lines written after gen, plus the new generation counter.
+	// Pass gen=0 to get all currently buffered lines.
+	LogLinesSince(gen int) ([]string, int)
 }

@@ -258,6 +258,18 @@ func (ms *ManagedService) Logs(n int) []string {
 	return drv.LogLines(n)
 }
 
+// LogsSince returns lines written after gen, plus the new generation counter.
+func (ms *ManagedService) LogsSince(gen int) ([]string, int) {
+	ms.mu.Lock()
+	drv := ms.drv
+	ms.mu.Unlock()
+
+	if drv == nil {
+		return nil, 0
+	}
+	return drv.LogLinesSince(gen)
+}
+
 // State returns the current service state.
 // For external services, state is always "running" — we observe health, not lifecycle.
 func (ms *ManagedService) State() ServiceState {

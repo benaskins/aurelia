@@ -37,4 +37,5 @@ func (d *ContainerDriver) Info() ProcessInfo                               { ret
 func (d *ContainerDriver) Wait() (int, error)                              { return -1, fmt.Errorf("container support excluded") }
 func (d *ContainerDriver) Stdout() io.Reader                               { return nil }
 func (d *ContainerDriver) LogLines(n int) []string                         { return nil }
+func (d *ContainerDriver) LogLinesSince(gen int) ([]string, int)           { return nil, 0 }
 func (d *ContainerDriver) ContainerID() string                             { return "" }
