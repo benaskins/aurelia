@@ -163,6 +163,7 @@ func (d *AdoptedDriver) LogLines(n int) []string {
 	return nil
 }
 
+// LogLinesSince returns nil — adopted processes don't have local log capture.
 func (d *AdoptedDriver) LogLinesSince(gen int) ([]string, int) {
 	return nil, 0
 }
