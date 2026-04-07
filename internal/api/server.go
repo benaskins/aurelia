@@ -132,7 +132,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	s.server = &http.Server{
 		Handler:           mux,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      0,             // disabled: streaming endpoints (logs --follow) require no write deadline
+		WriteTimeout:      0,             // disabled: Unix socket is localhost-only so there are no untrusted slow clients; streaming endpoints (logs --follow) require no write deadline
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20, // 1MB
@@ -675,8 +675,9 @@ func (s *Server) serviceLogsFollow(w http.ResponseWriter, r *http.Request, name 
 		return
 	}
 
-	// Verify service exists before opening stream
-	if _, _, err := s.daemon.ServiceLogsSince(name, 0); err != nil {
+	// Get initial snapshot and verify the service exists in one call.
+	lines, gen, err := s.daemon.ServiceLogsSince(name, 0)
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": errorMessage("service not found", err, r)})
 		return
 	}
@@ -697,12 +698,6 @@ func (s *Server) serviceLogsFollow(w http.ResponseWriter, r *http.Request, name 
 			flusher.Flush()
 		}
 		return true
-	}
-
-	// Send initial snapshot immediately, then poll for new lines.
-	lines, gen, err := s.daemon.ServiceLogsSince(name, 0)
-	if err != nil {
-		return
 	}
 	if !emit(lines) {
 		return
