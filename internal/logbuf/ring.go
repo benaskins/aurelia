@@ -20,6 +20,7 @@ type Ring struct {
 	pos          int
 	full         bool
 	maxLineBytes int
+	generation   int
 	// partial holds an incomplete line (no trailing newline yet)
 	partial bytes.Buffer
 }
@@ -77,6 +78,7 @@ func (r *Ring) addLine(line string) {
 	if r.pos == 0 {
 		r.full = true
 	}
+	r.generation++
 }
 
 // Lines returns all stored lines in order, oldest first.
@@ -109,4 +111,37 @@ func (r *Ring) Last(n int) []string {
 func (r *Ring) Reader() io.Reader {
 	lines := r.Lines()
 	return strings.NewReader(strings.Join(lines, "\n"))
+}
+
+// Since returns all lines written after gen, plus the current generation counter.
+// Pass gen=0 to get all currently buffered lines.
+// The returned generation can be passed to a subsequent Since call to receive only new lines.
+func (r *Ring) Since(gen int) ([]string, int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	newGen := r.generation
+	if gen >= newGen {
+		return nil, newGen
+	}
+
+	// How many new lines since gen?
+	newCount := newGen - gen
+
+	// Cap at buffer capacity — older lines have been overwritten.
+	total := r.pos
+	if r.full {
+		total = r.size
+	}
+	if newCount > total {
+		newCount = total
+	}
+
+	// Collect the last newCount lines in order.
+	result := make([]string, newCount)
+	for i := 0; i < newCount; i++ {
+		idx := (r.pos - newCount + i + r.size) % r.size
+		result[i] = r.lines[idx]
+	}
+	return result, newGen
 }
