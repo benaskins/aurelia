@@ -212,3 +212,7 @@ func (d *NativeDriver) Wait() (int, error) {
 func (d *NativeDriver) LogLines(n int) []string {
 	return d.buf.Last(n)
 }
+
+func (d *NativeDriver) LogLinesSince(gen int) ([]string, int) {
+	return d.buf.Since(gen)
+}

@@ -163,6 +163,10 @@ func (d *AdoptedDriver) LogLines(n int) []string {
 	return nil
 }
 
+func (d *AdoptedDriver) LogLinesSince(gen int) ([]string, int) {
+	return nil, 0
+}
+
 // VerifyProcess checks whether the process at the given PID matches the expected
 // command name and start time. This guards against PID reuse: if the OS recycled
 // the PID for a different process, the command or start time won't match and

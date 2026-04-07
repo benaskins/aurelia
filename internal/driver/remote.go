@@ -117,6 +117,11 @@ func (d *RemoteDriver) LogLines(n int) []string {
 	return nil
 }
 
+// LogLinesSince returns nil — remote services don't have local log capture.
+func (d *RemoteDriver) LogLinesSince(gen int) ([]string, int) {
+	return nil, 0
+}
+
 func runHook(ctx context.Context, command string) error {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	return cmd.Run()

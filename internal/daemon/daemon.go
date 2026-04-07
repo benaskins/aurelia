@@ -604,6 +604,16 @@ func (d *Daemon) ServiceLogs(name string, n int) ([]string, error) {
 	return ms.Logs(n), nil
 }
 
+// ServiceLogsSince returns lines written after gen, plus the new generation counter.
+func (d *Daemon) ServiceLogsSince(name string, gen int) ([]string, int, error) {
+	ms, err := d.getService(name)
+	if err != nil {
+		return nil, 0, err
+	}
+	lines, newGen := ms.LogsSince(gen)
+	return lines, newGen, nil
+}
+
 // ServiceState returns the state of a single service.
 func (d *Daemon) ServiceState(name string) (ServiceState, error) {
 	ms, err := d.getService(name)
