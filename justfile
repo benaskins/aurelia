@@ -12,11 +12,20 @@ test-all:
 test-integration:
     go test -tags integration ./...
 
-lint:
+lint: fmt-check
     go vet ./...
 
 fmt:
     go fmt ./...
+
+fmt-check:
+    @files=$(gofmt -l .); \
+    if [ -n "$files" ]; then \
+        echo "gofmt drift detected:"; \
+        echo "$files"; \
+        echo "Run: just fmt"; \
+        exit 1; \
+    fi
 
 build-lean:
     go build -tags nocontainer,nogpu -ldflags "-s -w -X main.version={{version}}" -o aurelia-lean ./cmd/aurelia/
