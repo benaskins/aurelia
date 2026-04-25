@@ -210,6 +210,7 @@ func (d *ContainerDriver) LogLines(n int) []string {
 	return d.buf.Last(n)
 }
 
+// LogLinesSince returns lines written after gen, plus the new generation counter.
 func (d *ContainerDriver) LogLinesSince(gen int) ([]string, int) {
 	return d.buf.Since(gen)
 }

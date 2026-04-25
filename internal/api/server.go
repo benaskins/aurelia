@@ -132,7 +132,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	s.server = &http.Server{
 		Handler:           mux,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      0,             // disabled: Unix socket is localhost-only so there are no untrusted slow clients; streaming endpoints (logs --follow) require no write deadline
+		WriteTimeout:      0, // disabled: safe on Unix socket (localhost-only, no untrusted slow clients); required for streaming endpoints
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20, // 1MB
@@ -724,6 +724,7 @@ func (s *Server) serviceLogsFollow(w http.ResponseWriter, r *http.Request, name 
 		gen = newGen
 	}
 }
+
 func (s *Server) reload(w http.ResponseWriter, r *http.Request) {
 	result, err := s.daemon.Reload(r.Context())
 	if err != nil {
