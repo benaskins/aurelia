@@ -42,6 +42,18 @@ func init() {
 }
 
 func runDaemon(cmd *cobra.Command, args []string) error {
+	// Route daemon logs to a size-rotating file. launchd's StandardErrorPath
+	// capture holds the fd open and never rotates, so daemon.log grew unbounded
+	// (~300MB). slog now writes the rotating file directly; launchd captures only
+	// early stdout/stderr and panics to daemon.boot.log (see install.go plist).
+	if home, err := os.UserHomeDir(); err == nil {
+		logPath := filepath.Join(home, ".aurelia", "daemon.log")
+		if mkErr := os.MkdirAll(filepath.Dir(logPath), 0o700); mkErr == nil {
+			lw := LogWriter(logPath)
+			slog.SetDefault(slog.New(slog.NewTextHandler(lw, &slog.HandlerOptions{Level: slog.LevelInfo})))
+		}
+	}
+
 	// Safety check: warn/block manual starts when a LaunchAgent is installed
 	if warning, err := launchdCheck(daemonForce); err != nil {
 		return err

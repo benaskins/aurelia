@@ -37,6 +37,10 @@ var installCmd = &cobra.Command{
 		plistDir := filepath.Join(home, "Library", "LaunchAgents")
 		plistPath := filepath.Join(plistDir, launchAgentLabel+".plist")
 		logPath := filepath.Join(home, ".aurelia", "daemon.log")
+		// launchd captures only early stdout/stderr and panics here; the daemon's
+		// slog output goes to the rotating daemon.log (internal/daemon.LogWriter).
+		// Pointing launchd at daemon.log too would double-write and defeat rotation.
+		bootLogPath := filepath.Join(home, ".aurelia", "daemon.boot.log")
 
 		if err := os.MkdirAll(plistDir, 0755); err != nil {
 			return fmt.Errorf("creating LaunchAgents dir: %w", err)
@@ -74,7 +78,7 @@ var installCmd = &cobra.Command{
     <string>%s</string>
 </dict>
 </plist>
-`, launchAgentLabel, html.EscapeString(binary), envSection, html.EscapeString(logPath), html.EscapeString(logPath))
+`, launchAgentLabel, html.EscapeString(binary), envSection, html.EscapeString(bootLogPath), html.EscapeString(bootLogPath))
 
 		if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
 			return fmt.Errorf("writing plist: %w", err)
