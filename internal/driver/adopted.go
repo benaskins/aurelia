@@ -219,6 +219,14 @@ func namesMatch(actual, expected string) bool {
 		return true
 	}
 
+	// macOS kern.proc P_comm caps process names at 16 chars (MAXCOMLEN), so a
+	// longer binary name is reported truncated. If the (truncated) actual name is
+	// a prefix of the expected name, treat it as a match — otherwise a service
+	// whose binary name exceeds 16 chars is wrongly seen as an orphan.
+	if len(actual) >= 15 && strings.HasPrefix(strings.ToLower(expected), strings.ToLower(actual)) {
+		return true
+	}
+
 	// Strip version suffixes for comparison: python3.12 → python, ruby3.2 → ruby
 	return strings.EqualFold(stripVersion(actual), stripVersion(expected))
 }
