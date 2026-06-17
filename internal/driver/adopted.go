@@ -180,19 +180,22 @@ func VerifyProcess(pid int, expectedCommand string, expectedStartTime int64) boo
 		return true // no identity recorded, best effort
 	}
 
-	// Check start time first — it's the strongest signal against PID reuse.
+	// Start time + PID uniquely identify a process: PID reuse with an identical
+	// start time is not realistically possible. So a matching start time is
+	// authoritative — trust it and skip the process-name check, which is brittle
+	// for wrapper/exec'd processes (P_comm differs from the command) and long
+	// binary names (P_comm truncates at 16 chars). The name check below is only a
+	// best-effort fallback for when no start time was recorded.
 	if expectedStartTime != 0 {
 		actual, err := processStartTime(pid)
 		if err != nil {
 			return false
 		}
-		if actual != expectedStartTime {
-			return false
-		}
+		return actual == expectedStartTime
 	}
 
 	if expectedCommand == "" {
-		return true // start time matched, no command to check
+		return true
 	}
 
 	actual, err := processName(pid)
